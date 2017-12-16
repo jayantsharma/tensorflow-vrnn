@@ -14,70 +14,93 @@ def linear(input_, output_size, scope=None, stddev=0.02, bias_start=0.0, with_w=
         else:
             return tf.matmul(input_, matrix) + bias
 
-class VartiationalRNNCell(tf.contrib.rnn.RNNCell):
+class VariationalRNNCell(tf.contrib.rnn.RNNCell):
     """Variational RNN cell."""
 
     def __init__(self, x_dim, h_dim, z_dim = 100):
-        self.n_h = h_dim
-        self.n_x = x_dim
-        self.n_z = z_dim
-        self.n_x_1 = x_dim
-        self.n_z_1 = z_dim
-        self.n_enc_hidden = z_dim
-        self.n_dec_hidden = x_dim
-        self.n_prior_hidden = z_dim
-        self.lstm = tf.contrib.rnn.LSTMCell(self.n_h, state_is_tuple=True)
+        self.rnn_dim = h_dim
+        self.x_dim = x_dim
+        self.z_dim = z_dim
+
+        # From the original IAMOnDB model in Theano
+        # q_z_dim = 150
+        # p_z_dim = 150
+        # p_x_dim = 250
+        # x2s_dim = 250
+        # z2s_dim = 150
+
+        self.q_z_dim = 50
+        self.p_z_dim = 50
+        self.p_x_dim = 20
+        self.x2s_dim = 10
+        self.z2s_dim = 50
+
+        self.target_dim = x_dim-1
+
+        self.lstm = tf.contrib.rnn.LSTMCell(self.rnn_dim, state_is_tuple=True)
 
 
+    # Duck Typing to pass off as an RNN cell
     @property
     def state_size(self):
-        return (self.n_h, self.n_h)
+        return (self.rnn_dim, self.rnn_dim)
 
     @property
     def output_size(self):
-        return self.n_h
+        # works but throws an error down the line
+        # return self.z_dim
+        # throws an error
+        # return self.rnn_dim
+
+        # According to: (enc_mu, enc_sigma, dec_mu, dec_sigma, dec_rho, dec_binary, prior_mu, prior_sigma)
+        return (self.z_dim, self.z_dim, self.target_dim, self.target_dim, 1, 1, self.z_dim, self.z_dim)
 
     def __call__(self, x, state, scope=None):
         with tf.variable_scope(scope or type(self).__name__):
-            h, c = state
+            # state = (c_state, m_state) == (cell_state, hidden_state)
+            c, h = state
 
             with tf.variable_scope("Prior"):
                 with tf.variable_scope("hidden"):
-                    prior_hidden = tf.nn.relu(linear(h, self.n_prior_hidden))
+                    prior_hidden = tf.nn.relu(linear(h, self.p_z_dim))
                 with tf.variable_scope("mu"):
-                    prior_mu = linear(prior_hidden, self.n_z)
+                    prior_mu = linear(prior_hidden, self.z_dim)
                 with tf.variable_scope("sigma"):
-                    prior_sigma = tf.nn.softplus(linear(prior_hidden, self.n_z))
+                    prior_sigma = tf.nn.softplus(linear(prior_hidden, self.z_dim))
 
             with tf.variable_scope("phi_x"):
-                x_1 = tf.nn.relu(linear(x, self.n_x_1))
+                x_1 = tf.nn.relu(linear(x, self.x2s_dim))
 
             with tf.variable_scope("Encoder"):
                 with tf.variable_scope("hidden"):
-                    enc_hidden = tf.nn.relu(linear(tf.concat(axis=1,values=(x_1, h)), self.n_enc_hidden))
+                    enc_hidden = tf.nn.relu(linear(tf.concat(axis=1,values=(x_1, h)), self.q_z_dim))
                 with tf.variable_scope("mu"):
-                    enc_mu    = linear(enc_hidden, self.n_z)
+                    enc_mu = linear(enc_hidden, self.z_dim)
                 with tf.variable_scope("sigma"):
-                    enc_sigma = tf.nn.softplus(linear(enc_hidden, self.n_z))
-            eps = tf.random_normal((x.get_shape().as_list()[0], self.n_z), 0.0, 1.0, dtype=tf.float32)
+                    enc_sigma = tf.nn.softplus(linear(enc_hidden, self.z_dim))
+
+            # The Reparametrization trick
+            eps = tf.random_normal((x.get_shape().as_list()[0], self.z_dim), 0.0, 1.0, dtype=tf.float32)
             # z = mu + sigma*epsilon
             z = tf.add(enc_mu, tf.multiply(enc_sigma, eps))
             with tf.variable_scope("phi_z"):
-                z_1 = tf.nn.relu(linear(z, self.n_z_1))
+                z_1 = tf.nn.relu(linear(z, self.z2s_dim))
 
             with tf.variable_scope("Decoder"):
                 with tf.variable_scope("hidden"):
-                    dec_hidden = tf.nn.relu(linear(tf.concat(axis=1,values=(z_1, h)), self.n_dec_hidden))
+                    dec_hidden = tf.nn.relu(linear(tf.concat(axis=1,values=(h, z_1)), self.p_x_dim))
                 with tf.variable_scope("mu"):
-                    dec_mu = linear(dec_hidden, self.n_x)
+                    dec_mu = linear(dec_hidden, self.target_dim)
                 with tf.variable_scope("sigma"):
-                    dec_sigma = tf.nn.softplus(linear(dec_hidden, self.n_x))
+                    dec_sigma = tf.nn.softplus(linear(dec_hidden, self.target_dim))
                 with tf.variable_scope("rho"):
-                    dec_rho = tf.nn.sigmoid(linear(dec_hidden, self.n_x))
+                    dec_rho = tf.nn.tanh(linear(dec_hidden, 1))
+                with tf.variable_scope("binary"):
+                    dec_binary = tf.nn.sigmoid(linear(dec_hidden, 1))
 
 
-            output, state2 = self.lstm(tf.concat(axis=1,values=(x_1, z_1)), state)
-        return (enc_mu, enc_sigma, dec_mu, dec_sigma, dec_rho, prior_mu, prior_sigma), state2
+            output, state2 = self.lstm(tf.concat(axis=1, values=(x_1, z_1)), state)
+        return (enc_mu, enc_sigma, dec_mu, dec_sigma, dec_rho, dec_binary, prior_mu, prior_sigma), state2
 
 
 
@@ -97,19 +120,82 @@ class VRNN():
 
             return result
 
-        def tf_kl_gaussgauss(mu_1, sigma_1, mu_2, sigma_2):
-            with tf.variable_scope("kl_gaussgauss"):
+        def nllBiGauss(y, mu, sig, corr, binary):
+            with tf.variable_scope('nllBiGauss'):
+                """
+                Bi-Gaussian model negative log-likelihood
+                Parameters
+                ----------
+                y      : Tensor
+                mu     : FullyConnected (linear)
+                sig    : FullyConnected (softplus)
+                corr   : FullyConnected (tanh)
+                binary : FullyConnected (sigmoid)
+                """
+                mu_1 = tf.reshape(mu[:, 0], (-1, 1))
+                mu_2 = tf.reshape(mu[:, 1], (-1, 1))
+
+                sig_1 = tf.reshape(sig[:, 0], (-1, 1))
+                sig_2 = tf.reshape(sig[:, 1], (-1, 1))
+
+                corr = tf.reshape(corr, (-1, 1))
+
+                y0 = tf.reshape(y[:, 0], (-1, 1))
+                y1 = tf.reshape(y[:, 1], (-1, 1))
+                y2 = tf.reshape(y[:, 2], (-1, 1))
+
+                c_b = tf.multiply(y0, tf.log(binary)) + tf.multiply(1 - y0, tf.log(1. - binary))
+
+                inner1 =  ((0.5*tf.log(1-corr**2)) +
+                           tf.log(sig_1) + tf.log(sig_2) + tf.log(2 * np.pi))
+
+                z = (((y1 - mu_1) / sig_1)**2 + ((y2 - mu_2) / sig_2)**2 -
+                     (2. * (corr * (y1 - mu_1) * (y2 - mu_2)) / (sig_1 * sig_2)))
+
+                inner2 = 0.5 * (1. / (1. - corr**2))
+                cost = - (inner1 + (inner2 * z))
+
+                # nll = -tf.reduce_mean((cost + c_b) * mask, axis=0)   # gives mean
+                nll = -(cost + c_b)
+
+            return nll
+
+#                 ss = tf.maximum(1e-10,tf.square(s))
+#                 norm = tf.subtract(y[:,:args.chunk_samples], mu)
+#                 z = tf.div(tf.square(norm), ss)
+#                 denom_log = tf.log(2*np.pi*ss, name='denom_log')
+#                 result = tf.reduce_sum(z+denom_log, 1)/2# -
+#                                        #(tf.log(tf.maximum(1e-20,rho),name='log_rho')*(1+y[:,args.chunk_samples:])
+#                                        # +tf.log(tf.maximum(1e-20,1-rho),name='log_rho_inv')*(1-y[:,args.chunk_samples:]))/2, 1)
+# 
+#             return result
+
+        def get_likelihood(dec_mu, dec_sigma, dec_rho, dec_binary, y, mask):
+            ll = - nllBiGauss(y, dec_mu, dec_sigma, dec_rho, dec_binary)
+            return tf.reduce_sum(ll * mask, axis=0)
+
+        # TODO: Need to review KL Divergence formula used here
+        def klGaussGauss(mu_1, sigma_1, mu_2, sigma_2):
+            with tf.variable_scope("klGaussGauss"):
                 return tf.reduce_sum(0.5 * (
-                    2 * tf.log(tf.maximum(1e-9,sigma_2),name='log_sigma_2') 
-                  - 2 * tf.log(tf.maximum(1e-9,sigma_1),name='log_sigma_1')
-                  + (tf.square(sigma_1) + tf.square(mu_1 - mu_2)) / tf.maximum(1e-9,(tf.square(sigma_2))) - 1
-                ), 1)
+                    2 * tf.log(sigma_2,name='log_sigma_2') 
+                  - 2 * tf.log(sigma_1,name='log_sigma_1')
+                  + (tf.square(sigma_1) + tf.square(mu_1 - mu_2)) / (tf.square(sigma_2)) - 1
+                ), axis=1, keep_dims=True)
+#                 return tf.reduce_sum(0.5 * (
+#                     2 * tf.log(tf.maximum(1e-9,sigma_2),name='log_sigma_2') 
+#                   - 2 * tf.log(tf.maximum(1e-9,sigma_1),name='log_sigma_1')
+#                   + (tf.square(sigma_1) + tf.square(mu_1 - mu_2)) / tf.maximum(1e-9,(tf.square(sigma_2))) - 1
+#                 ), 1)
 
-        def get_lossfunc(enc_mu, enc_sigma, dec_mu, dec_sigma, dec_rho, prior_mu, prior_sigma, y):
-            kl_loss = tf_kl_gaussgauss(enc_mu, enc_sigma, prior_mu, prior_sigma)
-            likelihood_loss = tf_normal(y, dec_mu, dec_sigma, dec_rho)
+        def get_lossfunc(enc_mu, enc_sigma, dec_mu, dec_sigma, dec_rho, dec_binary, prior_mu, prior_sigma, y, mask):
+            kl_loss = klGaussGauss(enc_mu, enc_sigma, prior_mu, prior_sigma)
+            nll_loss = nllBiGauss(y, dec_mu, dec_sigma, dec_rho, dec_binary)
 
-            return tf.reduce_mean(kl_loss + likelihood_loss)
+            loss = kl_loss + nll_loss
+            # import pdb; pdb.set_trace();
+            loss = loss * mask
+            return tf.reduce_mean(loss, axis=0)
             #return tf.reduce_mean(likelihood_loss)
 
         self.args = args
@@ -117,49 +203,69 @@ class VRNN():
             args.batch_size = 1
             args.seq_length = 1
 
-        cell = VartiationalRNNCell(args.chunk_samples, args.rnn_size, args.latent_size)
+        cell = VariationalRNNCell(args.x_dim, args.rnn_dim, args.z_dim)
 
         self.cell = cell
 
-        self.input_data = tf.placeholder(dtype=tf.float32, shape=[args.batch_size, args.seq_length, 2*args.chunk_samples], name='input_data')
-        self.target_data = tf.placeholder(dtype=tf.float32, shape=[args.batch_size, args.seq_length, 2*args.chunk_samples],name = 'target_data')
+        self.input_data = tf.placeholder(dtype=tf.float32, shape=[args.batch_size, args.max_length, args.x_dim], name='input_data')
+        self.mask = tf.placeholder(dtype=tf.float32, shape=[args.batch_size, args.max_length], name='mask')
+
         self.initial_state_c, self.initial_state_h = cell.zero_state(batch_size=args.batch_size, dtype=tf.float32)
 
-
         # input shape: (batch_size, n_steps, n_input)
-        with tf.variable_scope("inputs"):
-            inputs = tf.transpose(self.input_data, [1, 0, 2])  # permute n_steps and batch_size
-            inputs = tf.reshape(inputs, [-1, 2*args.chunk_samples]) # (n_steps*batch_size, n_input)
+        # with tf.variable_scope("inputs"):
 
-            # Split data because rnn cell needs a list of inputs for the RNN inner loop
-            inputs = tf.split(axis=0, num_or_size_splits=args.seq_length, value=inputs) # n_steps * (batch_size, n_hidden)
-        flat_target_data = tf.reshape(self.target_data,[-1, 2*args.chunk_samples])
+        # N x t x D
+        # sequence_length = tf.shape(self.input_data)[1]
+        # t x N x D
+        # inputs = tf.transpose(self.input_data, [1, 0, 2])
+        # tN x D
+        # inputs = tf.reshape(inputs, [sequence_length * args.batch_size, args.x_dim])
 
-        self.target = flat_target_data
-        self.flat_input = tf.reshape(tf.transpose(tf.stack(inputs),[1,0,2]),[args.batch_size*args.seq_length, -1])
-        self.input = tf.stack(inputs)
-        # Get vrnn cell output
-        outputs, last_state = tf.contrib.rnn.static_rnn(cell, inputs, initial_state=(self.initial_state_c,self.initial_state_h))
-        #print outputs
-        #outputs = map(tf.pack,zip(*outputs))
+        # Split data because rnn cell needs a list of inputs for the RNN inner loop
+        # t x (N x D), ie, list of tensors
+        # n_steps * (batch_size, n_hidden)
+        # inputs = tf.unstack(inputs, axis=0)
+
+        # N x t x D
+        inputs = self.input_data
+
+        # Get VRNN cell output
+        # Input in batch-major form, the default. No reshaping of input needed!!! :-)
+        outputs, last_state = tf.nn.dynamic_rnn(cell, inputs,
+                initial_state=tf.nn.rnn_cell.LSTMStateTuple(self.initial_state_c,self.initial_state_h))
+                # sequence_length is optional
+                # sequence_length=sequence_length, 
+                # will provide dtype, no initial state
+        # print outputs
+        # outputs = map(tf.pack,zip(*outputs))
         outputs_reshape = []
-        names = ["enc_mu", "enc_sigma", "dec_mu", "dec_sigma", "dec_rho", "prior_mu", "prior_sigma"]
+        names = ["enc_mu", "enc_sigma", "dec_mu", "dec_sigma", "dec_rho", "dec_binary", "prior_mu", "prior_sigma"]
         for n,name in enumerate(names):
             with tf.variable_scope(name):
-                x = tf.stack([o[n] for o in outputs])
-                x = tf.transpose(x,[1,0,2])
-                x = tf.reshape(x,[args.batch_size*args.seq_length, -1])
+                # N x t x D' (not x_dim)
+                x = outputs[n]
+                # Nt x D'
+                x = tf.reshape(x, [args.batch_size * args.max_length, -1])                
                 outputs_reshape.append(x)
 
-        enc_mu, enc_sigma, dec_mu, dec_sigma, dec_rho, prior_mu, prior_sigma = outputs_reshape
+        enc_mu, enc_sigma, dec_mu, dec_sigma, dec_rho, dec_binary, prior_mu, prior_sigma = outputs_reshape
         self.final_state_c,self.final_state_h = last_state
         self.mu = dec_mu
         self.sigma = dec_sigma
         self.rho = dec_rho
+        self.binary = dec_binary
 
-        lossfunc = get_lossfunc(enc_mu, enc_sigma, dec_mu, dec_sigma, dec_sigma, prior_mu, prior_sigma, flat_target_data)
-        self.sigma = dec_sigma
-        self.mu = dec_mu
+        # Nt x D
+        flat_input = tf.reshape(self.input_data,[args.batch_size * args.max_length, args.x_dim])
+        flat_mask = tf.reshape(self.mask, [-1,1])
+
+        # Loss = KL divergence + BiGaussian negative log-likelihood
+        lossfunc = get_lossfunc(enc_mu, enc_sigma, dec_mu, dec_sigma, dec_rho, dec_binary, prior_mu, prior_sigma, flat_input, flat_mask)
+
+        # Just get the likelihood (-nll)
+        self.likelihood_op = get_likelihood(dec_mu, dec_sigma, dec_rho, dec_binary, flat_input, flat_mask)
+
         with tf.variable_scope('cost'):
             self.cost = lossfunc 
         tf.summary.scalar('cost', self.cost)

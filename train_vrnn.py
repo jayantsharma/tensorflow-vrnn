@@ -1,7 +1,8 @@
 import numpy as np
 import tensorflow as tf
 
-import argparse
+# import argparse
+import configargparse
 import glob
 import time
 from datetime import datetime
@@ -9,6 +10,11 @@ import os
 import cPickle
 
 from model_vrnn import VRNN
+
+import sys
+if not sys.path[0] == '':
+    sys.path.insert(0, '')
+from nips2015_vrnn.datasets.iamondb import IAMOnDB
 
 from matplotlib import pyplot as plt
 
@@ -38,73 +44,162 @@ def next_batch(args):
     x[:, :, args.chunk_samples:] = 0.
     return x, y
 
+class Train:
+    def __init__(self, args, model):
+        self.args = args
+        self.model = model
 
-def train(args, model):
-    dirname = 'save-vrnn'
-    if not os.path.exists(dirname):
-        os.makedirs(dirname)
+    def load_datasets(self):
+        training_data = IAMOnDB(name='train',
+                             prep='normalize',
+                             cond=False,
+                             path=self.args.data_path).data
+        validation_data = IAMOnDB(name='valid',
+                             prep='normalize',
+                             cond=False,
+                             path=self.args.data_path).data
 
-    with open(os.path.join(dirname, 'config.pkl'), 'w') as f:
-        cPickle.dump(args, f)
+        """
+        Data (training/validation) is a vector of size num_samples, in which each of the samples is sized T x 3.
+        np.array(data) normally converts nested lists to ndarrays, but is not possible here because each of the 
+        samples is of different size (diff num of samples in series).
+        
+        Use a generator function to iterate over each of the samples.
+        """
+        def gen_train_samples():
+            data = training_data[0]
+            for i in range(data.shape[0]):
+                yield data[i]
+        def gen_valid_samples():
+            data = validation_data[0]
+            for i in range(data.shape[0]):
+                yield data[i]
 
-    ckpt = tf.train.get_checkpoint_state(dirname)
-    n_batches = 100
-    with tf.Session() as sess:
-        summary_writer = tf.summary.FileWriter('logs/' + datetime.now().isoformat().replace(':', '-'), sess.graph)
-        check = tf.add_check_numerics_ops()
-        merged = tf.summary.merge_all()
-        tf.global_variables_initializer().run()
-        saver = tf.train.Saver(tf.global_variables())
-        if ckpt:
-            saver.restore(sess, ckpt.model_checkpoint_path)
-            print "Loaded model"
-        start = time.time()
-        for e in xrange(args.num_epochs):
-            sess.run(tf.assign(model.lr, args.learning_rate * (args.decay_rate ** e)))
-            state = model.initial_state_c, model.initial_state_h
-            for b in xrange(n_batches):
-                x, y = next_batch(args)
-                feed = {model.input_data: x, model.target_data: y}
-                train_loss, _, cr, summary, sigma, mu, input, target= sess.run(
-                        [model.cost, model.train_op, check, merged, model.sigma, model.mu, model.flat_input, model.target],
-                                                             feed)
-                summary_writer.add_summary(summary, e * n_batches + b)
-                if (e * n_batches + b) % args.save_every == 0 and ((e * n_batches + b) > 0):
-                    checkpoint_path = os.path.join(dirname, 'model.ckpt')
-                    saver.save(sess, checkpoint_path, global_step=e * n_batches + b)
-                    print "model saved to {}".format(checkpoint_path)
-                end = time.time()
-                print "{}/{} (epoch {}), train_loss = {:.6f}, time/batch = {:.1f}, std = {:.3f}" \
-                    .format(e * n_batches + b,
-                            args.num_epochs * n_batches,
-                            e, args.chunk_samples * train_loss, end - start, sigma.mean(axis=0).mean(axis=0))
-                start = time.time()
+        training_dataset = tf.data.Dataset.from_generator(gen_train_samples, tf.float32, tf.TensorShape([None,3]))
+        validation_dataset = tf.data.Dataset.from_generator(gen_valid_samples, tf.float32, tf.TensorShape([None,3]))
+
+        # Indicates number of timesteps in each sequence, since we'll zero-pad each sequence to max_sequence_length.
+        def build_mask(x):
+            # x.shape = T x 3
+            return tf.ones_like(x[:,0])
+        training_dataset = training_dataset.map(lambda x: (x, build_mask(x)))
+        validation_dataset = validation_dataset.map(lambda x: (x, build_mask(x)))
+        # import pdb; pdb.set_trace();
+
+        # Every sequence has shape: length x features
+        training_dataset = training_dataset.padded_batch(self.args.batch_size, 
+                padded_shapes=([self.args.max_length, self.args.x_dim], [self.args.max_length]))
+        validation_dataset = validation_dataset.padded_batch(self.args.batch_size, 
+                padded_shapes=([self.args.max_length, self.args.x_dim], [self.args.max_length]))
+
+        # dataset.shuffle(1500)     # not sure (number of sequences ~ 1721 or something else)
+        # dataset.batch(args.batch_size)
+        # dataset.repeat(args.num_epochs)
+
+        # iterator = dataset.make_initializable_iterator()
+        iterator = tf.data.Iterator.from_structure(training_dataset.output_types, training_dataset.output_shapes)
+        self.training_init_op = iterator.make_initializer(training_dataset)
+        self.validation_init_op = iterator.make_initializer(validation_dataset)
+
+        self.next_batch = iterator.get_next()
+
+    def train(self):
+        dirname = 'save-vrnn'
+        if not os.path.exists(dirname):
+            os.makedirs(dirname)
+
+        with open(os.path.join(dirname, 'config.pkl'), 'w') as f:
+            cPickle.dump(self.args, f)
+
+        ckpt = tf.train.get_checkpoint_state(dirname)
+        n_batches = 100
+        with tf.Session() as sess:
+            summary_writer = tf.summary.FileWriter('logs/' + datetime.now().isoformat().replace(':', '-'), sess.graph)
+            # check = tf.add_check_numerics_ops()
+            merged = tf.summary.merge_all()
+            tf.global_variables_initializer().run()
+            saver = tf.train.Saver(tf.global_variables())
+            if ckpt:
+                saver.restore(sess, ckpt.model_checkpoint_path)
+                print "Loaded model"
+            start = time.time()
+            self.load_datasets()
+
+            for e in xrange(self.args.num_epochs):
+                sess.run(self.training_init_op)
+                sess.run(tf.assign(model.lr, self.args.lr * (self.args.decay_rate ** e)))
+                state = model.initial_state_c, model.initial_state_h
+                while True:
+                # for b in xrange(n_batches):
+                    # x, y = next_batch(args)
+                    try:
+                        foo = sess.run(self.next_batch)
+                        input_data, mask = foo
+                        # feed = {model.input_data: x, model.target_data: y}
+                        feed = {model.input_data: input_data, model.mask: mask}
+                        train_loss, _, cr, summary, sigma, mu, rho, binary = sess.run(
+                                [model.cost, model.train_op, merged, model.sigma, model.mu, model.rho, model.binary],
+                                                                     feed)
+                    except tf.errors.OutOfRangeError:
+                        # LOG LIKELIHOOD EVERY m EPOCHS
+                        sess.run(self.validation_init_op)
+                        ll = 0
+                        while True:
+                            try:
+                                input_data, mask = sess.run(self.next_batch)
+                                feed = {model.input_data: input_data, model.mask: mask}
+                                ll += sess.run(model.likelihood_op)
+                            except tf.errors.OutOfRangeError:
+                                print "Likelihood after {} epochs : {}".format(e+1, ll)
+
+                        summary_writer.add_summary(summary, e * n_batches + b)
+                        if e % self.args.save_every == 0:
+                            checkpoint_path = os.path.join(dirname, 'model.ckpt')
+                            saver.save(sess, checkpoint_path, global_step=e * n_batches + b)
+                            print "model saved to {}".format(checkpoint_path)
+                        end = time.time()
+    #                     print "{}/{} (epoch {}), train_loss = {:.6f}, time/batch = {:.1f}, std = {:.3f}" \
+    #                         .format(e, args.num_epochs, e, args.chunk_samples * train_loss, end - start, sigma.mean(axis=0).mean(axis=0))
+                        print "{}/{} (epoch {}), train_loss = {:.6f}".format(e, self.args.num_epochs, e, train_loss)
+                        start = time.time()
+                        break
 
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--rnn_size', type=int, default=3,
-                        help='size of RNN hidden state')
-    parser.add_argument('--latent_size', type=int, default=3,
-                        help='size of latent space')
-    parser.add_argument('--batch_size', type=int, default=3000,
-                        help='minibatch size')
-    parser.add_argument('--seq_length', type=int, default=100,
-                        help='RNN sequence length')
-    parser.add_argument('--num_epochs', type=int, default=100,
-                        help='number of epochs')
-    parser.add_argument('--save_every', type=int, default=500,
-                        help='save frequency')
-    parser.add_argument('--grad_clip', type=float, default=10.,
-                        help='clip gradients at this value')
-    parser.add_argument('--learning_rate', type=float, default=0.0005,
-                        help='learning rate')
-    parser.add_argument('--decay_rate', type=float, default=1.,
-                        help='decay of learning rate')
-    parser.add_argument('--chunk_samples', type=int, default=1,
-                        help='number of samples per mdct chunk')
-    args = parser.parse_args()
+    p = configargparse.ArgParser(default_config_files=['tensorflow-vrnn/iamondb.conf'])
+    p.add('-c', '--my-config',
+            is_config_file=True, help='config file path')
+    p.add('--data_path', help='Data path')
+    p.add('--max_length', type=int, default=2000,
+          help='maximum sequence length')
+    p.add('--x_dim', type=int, default=3,
+          help='size of input')
+    p.add('--rnn_dim', type=int, default=3,
+          help='size of RNN hidden state')
+    p.add('--z_dim', type=int, default=3,
+          help='size of latent space')
+    p.add('--batch_size', type=int, default=3000,
+          help='minibatch size')
+    p.add('--num_k', type=int, default=20,
+          help='number of GMM components')
+#     p.add('--seq_length', type=int, default=100,
+#           help='RNN sequence length')
+    p.add('--num_epochs', type=int, default=100,
+          help='number of epochs')
+    p.add('--save_every', type=int, default=500,
+          help='save frequency')
+    p.add('--grad_clip', type=float, default=10.,
+          help='clip gradients at this value')
+    p.add('--lr', type=float, default=0.0005,
+          help='learning rate')
+    p.add('--decay_rate', type=float, default=1.,
+          help='decay of learning rate')
+    p.add('--debug', type=int, default=0,
+          help='debug')
+    # p.add('-d', '--dbsnp', help='known variants .vcf', env_var='DBSNP_PATH')
+
+    args = p.parse_args()
 
     model = VRNN(args)
 
-    train(args, model)
+    Train(args, model).train()
