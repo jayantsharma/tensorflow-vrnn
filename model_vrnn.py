@@ -80,7 +80,7 @@ class VariationalRNNCell(tf.contrib.rnn.RNNCell):
                     enc_sigma = tf.nn.softplus(linear(enc_hidden, self.z_dim))
 
             # The Reparametrization trick
-            eps = tf.random_normal((x.get_shape().as_list()[0], self.z_dim), 0.0, 1.0, dtype=tf.float32)
+            eps = tf.random_normal((tf.shape(x)[0], self.z_dim), 0.0, 1.0, dtype=tf.float32)
             # z = mu + sigma*epsilon
             z = tf.add(enc_mu, tf.multiply(enc_sigma, eps))
             with tf.variable_scope("phi_z"):
@@ -177,6 +177,8 @@ class VRNN():
         # TODO: Need to review KL Divergence formula used here
         def klGaussGauss(mu_1, sigma_1, mu_2, sigma_2):
             with tf.variable_scope("klGaussGauss"):
+                # Input:  Nt x D'
+                # Output: Nt x 1
                 return tf.reduce_sum(0.5 * (
                     2 * tf.log(sigma_2,name='log_sigma_2') 
                   - 2 * tf.log(sigma_1,name='log_sigma_1')
@@ -207,8 +209,8 @@ class VRNN():
 
         self.cell = cell
 
-        self.input_data = tf.placeholder(dtype=tf.float32, shape=[args.batch_size, args.max_length, args.x_dim], name='input_data')
-        self.mask = tf.placeholder(dtype=tf.float32, shape=[args.batch_size, args.max_length], name='mask')
+        self.input_data = tf.placeholder(dtype=tf.float32, shape=[None, args.max_length, args.x_dim], name='input_data')
+        self.mask = tf.placeholder(dtype=tf.float32, shape=[None, args.max_length], name='mask')
 
         self.initial_state_c, self.initial_state_h = cell.zero_state(batch_size=args.batch_size, dtype=tf.float32)
 
@@ -241,12 +243,13 @@ class VRNN():
         # outputs = map(tf.pack,zip(*outputs))
         outputs_reshape = []
         names = ["enc_mu", "enc_sigma", "dec_mu", "dec_sigma", "dec_rho", "dec_binary", "prior_mu", "prior_sigma"]
+        dims = [args.z_dim]*2 + [args.x_dim-1]*2 + [1]*2 + [args.z_dim]*2
         for n,name in enumerate(names):
             with tf.variable_scope(name):
                 # N x t x D' (not x_dim)
                 x = outputs[n]
                 # Nt x D'
-                x = tf.reshape(x, [args.batch_size * args.max_length, -1])                
+                x = tf.reshape(x, [-1, dims[n]])                
                 outputs_reshape.append(x)
 
         enc_mu, enc_sigma, dec_mu, dec_sigma, dec_rho, dec_binary, prior_mu, prior_sigma = outputs_reshape
@@ -257,7 +260,7 @@ class VRNN():
         self.binary = dec_binary
 
         # Nt x D
-        flat_input = tf.reshape(self.input_data,[args.batch_size * args.max_length, args.x_dim])
+        flat_input = tf.reshape(self.input_data,[-1, args.x_dim])
         flat_mask = tf.reshape(self.mask, [-1,1])
 
         # Loss = KL divergence + BiGaussian negative log-likelihood

@@ -84,7 +84,7 @@ class Train:
             return tf.ones_like(x[:,0])
         training_dataset = training_dataset.map(lambda x: (x, build_mask(x)))
         validation_dataset = validation_dataset.map(lambda x: (x, build_mask(x)))
-        # import pdb; pdb.set_trace();
+        # import ipdb; ipdb.set_trace(context=5);
 
         # Every sequence has shape: length x features
         training_dataset = training_dataset.padded_batch(self.args.batch_size, 
@@ -112,7 +112,6 @@ class Train:
             cPickle.dump(self.args, f)
 
         ckpt = tf.train.get_checkpoint_state(dirname)
-        n_batches = 100
         with tf.Session() as sess:
             summary_writer = tf.summary.FileWriter('logs/' + datetime.now().isoformat().replace(':', '-'), sess.graph)
             # check = tf.add_check_numerics_ops()
@@ -124,78 +123,62 @@ class Train:
                 print "Loaded model"
             start = time.time()
             self.load_datasets()
+            def get_feed():
+                input_data, mask = sess.run(self.next_batch)
+                feed = {model.input_data: input_data, model.mask: mask}
+                return feed
 
             for e in xrange(self.args.num_epochs):
                 sess.run(self.training_init_op)
                 sess.run(tf.assign(model.lr, self.args.lr * (self.args.decay_rate ** e)))
                 state = model.initial_state_c, model.initial_state_h
                 while True:
-                # for b in xrange(n_batches):
-                    # x, y = next_batch(args)
                     try:
-                        foo = sess.run(self.next_batch)
-                        input_data, mask = foo
-                        # feed = {model.input_data: x, model.target_data: y}
-                        feed = {model.input_data: input_data, model.mask: mask}
+                        raise ValueError
                         train_loss, _, cr, summary, sigma, mu, rho, binary = sess.run(
                                 [model.cost, model.train_op, merged, model.sigma, model.mu, model.rho, model.binary],
-                                                                     feed)
-                    except tf.errors.OutOfRangeError:
+                                                                     get_feed())
+                    # except tf.errors.OutOfRangeError:
+                    except:
                         # LOG LIKELIHOOD EVERY m EPOCHS
-                        sess.run(self.validation_init_op)
-                        ll = 0
-                        while True:
-                            try:
-                                input_data, mask = sess.run(self.next_batch)
-                                feed = {model.input_data: input_data, model.mask: mask}
-                                ll += sess.run(model.likelihood_op)
-                            except tf.errors.OutOfRangeError:
-                                print "Likelihood after {} epochs : {}".format(e+1, ll)
+                        if e % args.monitor_every == 0:
+                            sess.run(self.validation_init_op)
+                            ll = 0
+                            while True:
+                                try:
+                                    ll += sess.run(model.likelihood_op, get_feed())
+                                except tf.errors.OutOfRangeError:
+                                    print "Likelihood after {} epochs : {}".format(e+1, ll)
 
-                        summary_writer.add_summary(summary, e * n_batches + b)
-                        if e % self.args.save_every == 0:
-                            checkpoint_path = os.path.join(dirname, 'model.ckpt')
-                            saver.save(sess, checkpoint_path, global_step=e * n_batches + b)
-                            print "model saved to {}".format(checkpoint_path)
-                        end = time.time()
-    #                     print "{}/{} (epoch {}), train_loss = {:.6f}, time/batch = {:.1f}, std = {:.3f}" \
-    #                         .format(e, args.num_epochs, e, args.chunk_samples * train_loss, end - start, sigma.mean(axis=0).mean(axis=0))
-                        print "{}/{} (epoch {}), train_loss = {:.6f}".format(e, self.args.num_epochs, e, train_loss)
-                        start = time.time()
-                        break
+                            summary_writer.add_summary(summary, e)
+                            if e % self.args.save_every == 0:
+                                checkpoint_path = os.path.join(dirname, 'model.ckpt')
+                                saver.save(sess, checkpoint_path, global_step=e)
+                                print "model saved to {}".format(checkpoint_path)
+                            end = time.time()
+                            print "{}/{} (epoch {}), log_likelihood = {:.6f}".format(e, self.args.num_epochs, e, ll)
+                            start = time.time()
+                            break
 
 
 if __name__ == '__main__':
     p = configargparse.ArgParser(default_config_files=['tensorflow-vrnn/iamondb.conf'])
     p.add('-c', '--my-config',
             is_config_file=True, help='config file path')
-    p.add('--data_path', help='Data path')
-    p.add('--max_length', type=int, default=2000,
-          help='maximum sequence length')
-    p.add('--x_dim', type=int, default=3,
-          help='size of input')
-    p.add('--rnn_dim', type=int, default=3,
-          help='size of RNN hidden state')
-    p.add('--z_dim', type=int, default=3,
-          help='size of latent space')
-    p.add('--batch_size', type=int, default=3000,
-          help='minibatch size')
-    p.add('--num_k', type=int, default=20,
-          help='number of GMM components')
-#     p.add('--seq_length', type=int, default=100,
-#           help='RNN sequence length')
-    p.add('--num_epochs', type=int, default=100,
-          help='number of epochs')
-    p.add('--save_every', type=int, default=500,
-          help='save frequency')
-    p.add('--grad_clip', type=float, default=10.,
-          help='clip gradients at this value')
-    p.add('--lr', type=float, default=0.0005,
-          help='learning rate')
-    p.add('--decay_rate', type=float, default=1.,
-          help='decay of learning rate')
-    p.add('--debug', type=int, default=0,
-          help='debug')
+    p.add('--data_path',  help='Data path')
+    p.add('--max_length', type=int, default=2000, help='maximum sequence length')
+    p.add('--rnn_dim',    type=int, default=3, help='size of RNN hidden state')
+    p.add('--x_dim',      type=int, default=3, help='size of input')
+    p.add('--z_dim',      type=int, default=3, help='size of latent space')
+    p.add('--num_k',      type=int, default=20, help='number of GMM components')
+    p.add('--batch_size', type=int, default=3000, help='minibatch size')
+    p.add('--num_epochs', type=int, default=100, help='number of epochs')
+    p.add('--lr',         type=float, default=0.0005, help='learning rate')
+    p.add('--decay_rate', type=float, default=1., help='decay of learning rate')
+    p.add('--save_every', type=int, default=500, help='save frequency')
+    p.add('--monitor_every', type=int, default=10, help='monitoring frequency')
+    p.add('--grad_clip',  type=float, default=10., help='clip gradients at this value')
+    p.add('--debug',      type=int, default=0, help='debug')
     # p.add('-d', '--dbsnp', help='known variants .vcf', env_var='DBSNP_PATH')
 
     args = p.parse_args()
