@@ -197,6 +197,7 @@ class VRNN():
             loss = kl_loss + nll_loss
             # import pdb; pdb.set_trace();
             loss = loss * mask
+            loss = tf.reshape(loss, [-1])
             return tf.reduce_mean(loss, axis=0)
             #return tf.reduce_mean(likelihood_loss)
 

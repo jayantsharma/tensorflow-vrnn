@@ -112,7 +112,7 @@ class Train:
             cPickle.dump(self.args, f)
 
         ckpt = tf.train.get_checkpoint_state(dirname)
-        with tf.Session() as sess:
+        with tf.Session(config=tf.ConfigProto(log_device_placement=True)) as sess:
             summary_writer = tf.summary.FileWriter('logs/' + datetime.now().isoformat().replace(':', '-'), sess.graph)
             # check = tf.add_check_numerics_ops()
             merged = tf.summary.merge_all()
@@ -129,18 +129,20 @@ class Train:
                 return feed
 
             for e in xrange(1, self.args.num_epochs+1):
+                print 'Processing epoch: {}'.format(e)
                 sess.run(self.training_init_op)
                 sess.run(tf.assign(model.lr, self.args.lr))
                 # sess.run(tf.assign(model.lr, self.args.lr * (self.args.decay_rate ** e)))
                 state = model.initial_state_c, model.initial_state_h
+                b = 1
                 while True:
                     try:
-                        raise ValueError
-                        train_loss, _, cr, summary, sigma, mu, rho, binary = sess.run(
+                        train_loss, gd, summary, sigma, mu, rho, binary = sess.run(
                                 [model.cost, model.train_op, merged, model.sigma, model.mu, model.rho, model.binary],
                                                                      get_feed())
-                    # except tf.errors.OutOfRangeError:
-                    except:
+                        print 'Training batch : {}'.format(b)
+                        b += 1
+                    except tf.errors.OutOfRangeError:
                         break
 
                 # end-of-epoch processing
@@ -148,9 +150,12 @@ class Train:
                 if e % args.monitor_every == 0:
                     sess.run(self.validation_init_op)
                     ll = 0
+                    b = 1
                     while True:
                         try:
                             ll += sess.run(model.likelihood_op, get_feed())
+                            print 'Validation batch : {}'.format(b)
+                            b += 1
                         except tf.errors.OutOfRangeError:
                             print "{}/{} (epoch {}), log_likelihood = {}".format(e, self.args.num_epochs, e, ll)
                             # summary_writer.add_summary(summary, e)
