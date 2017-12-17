@@ -148,17 +148,13 @@ class Train:
                                 try:
                                     ll += sess.run(model.likelihood_op, get_feed())
                                 except tf.errors.OutOfRangeError:
-                                    print "Likelihood after {} epochs : {}".format(e+1, ll)
-
-                            summary_writer.add_summary(summary, e)
-                            if e % self.args.save_every == 0:
-                                checkpoint_path = os.path.join(dirname, 'model.ckpt')
-                                saver.save(sess, checkpoint_path, global_step=e)
-                                print "model saved to {}".format(checkpoint_path)
-                            end = time.time()
-                            print "{}/{} (epoch {}), log_likelihood = {:.6f}".format(e, self.args.num_epochs, e, ll)
-                            start = time.time()
-                            break
+                                    summary_writer.add_summary(summary, e)
+                                    if e % self.args.save_every == 0:
+                                        checkpoint_path = os.path.join(dirname, 'model.ckpt')
+                                        saver.save(sess, checkpoint_path, global_step=e)
+                                        print "model saved to {}".format(checkpoint_path)
+                                    print "{}/{} (epoch {}), log_likelihood = {:.6f}".format(e, self.args.num_epochs, e, ll)
+                                    break
 
 
 if __name__ == '__main__':

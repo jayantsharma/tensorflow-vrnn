@@ -212,7 +212,7 @@ class VRNN():
         self.input_data = tf.placeholder(dtype=tf.float32, shape=[None, args.max_length, args.x_dim], name='input_data')
         self.mask = tf.placeholder(dtype=tf.float32, shape=[None, args.max_length], name='mask')
 
-        self.initial_state_c, self.initial_state_h = cell.zero_state(batch_size=args.batch_size, dtype=tf.float32)
+        self.initial_state_c, self.initial_state_h = cell.zero_state(batch_size=tf.shape(self.input_data)[0], dtype=tf.float32)
 
         # input shape: (batch_size, n_steps, n_input)
         # with tf.variable_scope("inputs"):
