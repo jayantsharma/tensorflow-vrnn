@@ -128,9 +128,10 @@ class Train:
                 feed = {model.input_data: input_data, model.mask: mask}
                 return feed
 
-            for e in xrange(self.args.num_epochs):
+            for e in xrange(1, self.args.num_epochs+1):
                 sess.run(self.training_init_op)
-                sess.run(tf.assign(model.lr, self.args.lr * (self.args.decay_rate ** e)))
+                sess.run(tf.assign(model.lr, self.args.lr))
+                # sess.run(tf.assign(model.lr, self.args.lr * (self.args.decay_rate ** e)))
                 state = model.initial_state_c, model.initial_state_h
                 while True:
                     try:
@@ -140,21 +141,24 @@ class Train:
                                                                      get_feed())
                     # except tf.errors.OutOfRangeError:
                     except:
-                        # LOG LIKELIHOOD EVERY m EPOCHS
-                        if e % args.monitor_every == 0:
-                            sess.run(self.validation_init_op)
-                            ll = 0
-                            while True:
-                                try:
-                                    ll += sess.run(model.likelihood_op, get_feed())
-                                except tf.errors.OutOfRangeError:
-                                    summary_writer.add_summary(summary, e)
-                                    if e % self.args.save_every == 0:
-                                        checkpoint_path = os.path.join(dirname, 'model.ckpt')
-                                        saver.save(sess, checkpoint_path, global_step=e)
-                                        print "model saved to {}".format(checkpoint_path)
-                                    print "{}/{} (epoch {}), log_likelihood = {:.6f}".format(e, self.args.num_epochs, e, ll)
-                                    break
+                        break
+
+                # end-of-epoch processing
+                # LOG LIKELIHOOD EVERY m EPOCHS
+                if e % args.monitor_every == 0:
+                    sess.run(self.validation_init_op)
+                    ll = 0
+                    while True:
+                        try:
+                            ll += sess.run(model.likelihood_op, get_feed())
+                        except tf.errors.OutOfRangeError:
+                            print "{}/{} (epoch {}), log_likelihood = {}".format(e, self.args.num_epochs, e, ll)
+                            # summary_writer.add_summary(summary, e)
+                            if e % self.args.save_every == 0:
+                                checkpoint_path = os.path.join(dirname, 'model.ckpt')
+                                saver.save(sess, checkpoint_path, global_step=e)
+                                print "model saved to {}".format(checkpoint_path)
+                            break
 
 
 if __name__ == '__main__':
