@@ -1,3 +1,9 @@
+from __future__ import print_function
+from __future__ import unicode_literals
+from future import standard_library
+standard_library.install_aliases()
+from builtins import range
+from builtins import object
 import numpy as np
 import tensorflow as tf
 
@@ -7,7 +13,7 @@ import glob
 import time
 from datetime import datetime
 import os
-import cPickle
+import pickle
 
 from model_vrnn import VRNN
 
@@ -44,7 +50,7 @@ def next_batch(args):
     x[:, :, args.chunk_samples:] = 0.
     return x, y
 
-class Train:
+class Train(object):
     def __init__(self, args, model):
         self.args = args
         self.model = model
@@ -108,8 +114,9 @@ class Train:
         if not os.path.exists(dirname):
             os.makedirs(dirname)
 
-        with open(os.path.join(dirname, 'config.pkl'), 'w') as f:
-            cPickle.dump(self.args, f)
+        # import ipdb; ipdb.set_trace()
+        with open(os.path.join(dirname, 'config.pkl'), 'wb') as f:
+            pickle.dump(self.args, f)
 
         ckpt = tf.train.get_checkpoint_state(dirname)
         with tf.Session(config=tf.ConfigProto(log_device_placement=True)) as sess:
@@ -120,7 +127,7 @@ class Train:
             saver = tf.train.Saver(tf.global_variables())
             if ckpt:
                 saver.restore(sess, ckpt.model_checkpoint_path)
-                print "Loaded model"
+                print("Loaded model")
             start = time.time()
             self.load_datasets()
             def get_feed():
@@ -128,8 +135,8 @@ class Train:
                 feed = {model.input_data: input_data, model.mask: mask}
                 return feed
 
-            for e in xrange(1, self.args.num_epochs+1):
-                print 'Processing epoch: {}'.format(e)
+            for e in range(1, self.args.num_epochs+1):
+                print('Processing epoch: {}'.format(e))
                 sess.run(self.training_init_op)
                 sess.run(tf.assign(model.lr, self.args.lr))
                 # sess.run(tf.assign(model.lr, self.args.lr * (self.args.decay_rate ** e)))
@@ -140,7 +147,7 @@ class Train:
                         train_loss, gd, summary, sigma, mu, rho, binary = sess.run(
                                 [model.cost, model.train_op, merged, model.sigma, model.mu, model.rho, model.binary],
                                                                      get_feed())
-                        print 'Training batch : {}'.format(b)
+                        print('Training batch : {}'.format(b))
                         b += 1
                     except tf.errors.OutOfRangeError:
                         break
@@ -154,15 +161,15 @@ class Train:
                     while True:
                         try:
                             ll += sess.run(model.likelihood_op, get_feed())
-                            print 'Validation batch : {}'.format(b)
+                            print('Validation batch : {}'.format(b))
                             b += 1
                         except tf.errors.OutOfRangeError:
-                            print "{}/{} (epoch {}), log_likelihood = {}".format(e, self.args.num_epochs, e, ll)
+                            print("{}/{} (epoch {}), log_likelihood = {}".format(e, self.args.num_epochs, e, ll))
                             # summary_writer.add_summary(summary, e)
                             if e % self.args.save_every == 0:
                                 checkpoint_path = os.path.join(dirname, 'model.ckpt')
                                 saver.save(sess, checkpoint_path, global_step=e)
-                                print "model saved to {}".format(checkpoint_path)
+                                print("model saved to {}".format(checkpoint_path))
                             break
 
 

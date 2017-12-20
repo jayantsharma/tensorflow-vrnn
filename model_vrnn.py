@@ -1,3 +1,8 @@
+from __future__ import print_function
+from __future__ import unicode_literals
+from builtins import zip
+from builtins import range
+from builtins import object
 import tensorflow as tf
 import numpy as np
 
@@ -105,7 +110,7 @@ class VariationalRNNCell(tf.contrib.rnn.RNNCell):
 
 
 
-class VRNN():
+class VRNN(object):
     def __init__(self, args, sample=False):
 
         def tf_normal(y, mu, s, rho):
@@ -280,14 +285,14 @@ class VRNN():
         self.lr = tf.Variable(0.0, trainable=False)
         tvars = tf.trainable_variables()
         for t in tvars:
-            print t.name
+            print(t.name)
         grads = tf.gradients(self.cost, tvars)
         #grads = tf.cond(
         #    tf.global_norm(grads) > 1e-20,
         #    lambda: tf.clip_by_global_norm(grads, args.grad_clip)[0],
         #    lambda: grads)
         optimizer = tf.train.AdamOptimizer(self.lr)
-        self.train_op = optimizer.apply_gradients(zip(grads, tvars))
+        self.train_op = optimizer.apply_gradients(list(zip(grads, tvars)))
         #self.saver = tf.train.Saver(tf.all_variables())
 
     def sample(self, sess, args, num=4410, start=None):
@@ -319,7 +324,7 @@ class VRNN():
         mus = np.zeros((num, args.chunk_samples), dtype=np.float32)
         sigmas = np.zeros((num, args.chunk_samples), dtype=np.float32)
 
-        for i in xrange(num):
+        for i in range(num):
             feed = {self.input_data: prev_x,
                     self.initial_state_c:prev_state[0],
                     self.initial_state_h:prev_state[1]}
