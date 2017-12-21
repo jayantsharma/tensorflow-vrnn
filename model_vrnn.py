@@ -112,6 +112,14 @@ class VariationalRNNCell(tf.contrib.rnn.RNNCell):
 
 class VRNN(object):
     def __init__(self, args, sample=False):
+        self.args = args
+#         if sample:
+#             args.batch_size = 1
+#             args.seq_length = 1
+
+        cell = VariationalRNNCell(args.x_dim, args.rnn_dim, args.z_dim)
+
+        self.cell = cell
 
         def tf_normal(y, mu, s, rho):
             with tf.variable_scope('normal'):
@@ -206,19 +214,10 @@ class VRNN(object):
             return tf.reduce_mean(loss, axis=0)
             #return tf.reduce_mean(likelihood_loss)
 
-        self.args = args
-        if sample:
-            args.batch_size = 1
-            args.seq_length = 1
+        input_data = tf.placeholder(dtype=tf.float32, shape=[None, args.max_length, args.x_dim], name='input_data')
+        mask = tf.placeholder(dtype=tf.float32, shape=[None, args.max_length], name='mask')
 
-        cell = VariationalRNNCell(args.x_dim, args.rnn_dim, args.z_dim)
-
-        self.cell = cell
-
-        self.input_data = tf.placeholder(dtype=tf.float32, shape=[None, args.max_length, args.x_dim], name='input_data')
-        self.mask = tf.placeholder(dtype=tf.float32, shape=[None, args.max_length], name='mask')
-
-        self.initial_state_c, self.initial_state_h = cell.zero_state(batch_size=tf.shape(self.input_data)[0], dtype=tf.float32)
+        self.initial_state_c, self.initial_state_h = cell.zero_state(batch_size=tf.shape(input_data)[0], dtype=tf.float32)
 
         # input shape: (batch_size, n_steps, n_input)
         # with tf.variable_scope("inputs"):
@@ -236,7 +235,7 @@ class VRNN(object):
         # inputs = tf.unstack(inputs, axis=0)
 
         # N x t x D
-        inputs = self.input_data
+        inputs = input_data
 
         # Get VRNN cell output
         # Input in batch-major form, the default. No reshaping of input needed!!! :-)
@@ -266,8 +265,8 @@ class VRNN(object):
         self.binary = dec_binary
 
         # Nt x D
-        flat_input = tf.reshape(self.input_data,[-1, args.x_dim])
-        flat_mask = tf.reshape(self.mask, [-1,1])
+        flat_input = tf.reshape(input_data,[-1, args.x_dim])
+        flat_mask = tf.reshape(mask, [-1,1])
 
         # Loss = KL divergence + BiGaussian negative log-likelihood
         lossfunc = get_lossfunc(enc_mu, enc_sigma, dec_mu, dec_sigma, dec_rho, dec_binary, prior_mu, prior_sigma, flat_input, flat_mask)
@@ -282,7 +281,7 @@ class VRNN(object):
         tf.summary.scalar('sigma', tf.reduce_mean(self.sigma))
 
 
-        self.lr = tf.Variable(0.0, trainable=False)
+        # self.lr = tf.Variable(self.args.lr, trainable=False)
         tvars = tf.trainable_variables()
         for t in tvars:
             print(t.name)
@@ -291,7 +290,7 @@ class VRNN(object):
         #    tf.global_norm(grads) > 1e-20,
         #    lambda: tf.clip_by_global_norm(grads, args.grad_clip)[0],
         #    lambda: grads)
-        optimizer = tf.train.AdamOptimizer(self.lr)
+        optimizer = tf.train.AdamOptimizer(self.args.lr)
         self.train_op = optimizer.apply_gradients(list(zip(grads, tvars)))
         #self.saver = tf.train.Saver(tf.all_variables())
 
@@ -308,7 +307,7 @@ class VRNN(object):
             for i in range(start.shape[0]-1):
                 prev_x = start[i,:]
                 prev_x = prev_x[np.newaxis,np.newaxis,:]
-                feed = {self.input_data: prev_x,
+                feed = {input_data: prev_x,
                         self.initial_state_c:prev_state[0],
                         self.initial_state_h:prev_state[1]}
                 
@@ -325,7 +324,7 @@ class VRNN(object):
         sigmas = np.zeros((num, args.chunk_samples), dtype=np.float32)
 
         for i in range(num):
-            feed = {self.input_data: prev_x,
+            feed = {input_data: prev_x,
                     self.initial_state_c:prev_state[0],
                     self.initial_state_h:prev_state[1]}
             [o_mu, o_sigma, o_rho, next_state_c, next_state_h] = sess.run([self.mu, self.sigma,

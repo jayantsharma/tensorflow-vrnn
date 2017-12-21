@@ -97,17 +97,7 @@ class Train(object):
                 padded_shapes=([self.args.max_length, self.args.x_dim], [self.args.max_length]))
         validation_dataset = validation_dataset.padded_batch(self.args.batch_size, 
                 padded_shapes=([self.args.max_length, self.args.x_dim], [self.args.max_length]))
-
-        # dataset.shuffle(1500)     # not sure (number of sequences ~ 1721 or something else)
-        # dataset.batch(args.batch_size)
-        # dataset.repeat(args.num_epochs)
-
-        # iterator = dataset.make_initializable_iterator()
-        iterator = tf.data.Iterator.from_structure(training_dataset.output_types, training_dataset.output_shapes)
-        self.training_init_op = iterator.make_initializer(training_dataset)
-        self.validation_init_op = iterator.make_initializer(validation_dataset)
-
-        self.next_batch = iterator.get_next()
+        return training_dataset, validation_dataset
 
     def train(self):
         dirname = 'save-vrnn'
@@ -119,35 +109,38 @@ class Train(object):
             pickle.dump(self.args, f)
 
         ckpt = tf.train.get_checkpoint_state(dirname)
-        with tf.Session(config=tf.ConfigProto(log_device_placement=True)) as sess:
+        with tf.Session() as sess:
             summary_writer = tf.summary.FileWriter('logs/' + datetime.now().isoformat().replace(':', '-'), sess.graph)
             # check = tf.add_check_numerics_ops()
-            merged = tf.summary.merge_all()
+            # merged = tf.summary.merge_all()
             tf.global_variables_initializer().run()
             saver = tf.train.Saver(tf.global_variables())
             if ckpt:
                 saver.restore(sess, ckpt.model_checkpoint_path)
                 print("Loaded model")
             start = time.time()
-            self.load_datasets()
-            def get_feed():
-                input_data, mask = sess.run(self.next_batch)
-                feed = {model.input_data: input_data, model.mask: mask}
-                return feed
+
+            # Set up data pipeline
+            training_dataset, validation_dataset = self.load_datasets()
+
+            iterator = tf.data.Iterator.from_structure(training_dataset.output_types, training_dataset.output_shapes)
+            input_data, mask = iterator.get_next()
+            import ipdb; ipdb.set_trace(context=5);
+
+            training_init_op = iterator.make_initializer(training_dataset)
+            validation_init_op = iterator.make_initializer(validation_dataset)
 
             for e in range(1, self.args.num_epochs+1):
                 print('Processing epoch: {}'.format(e))
-                sess.run(self.training_init_op)
-                sess.run(tf.assign(model.lr, self.args.lr))
+                sess.run(training_init_op)
+                # sess.run(tf.assign(model.lr, self.args.lr))
                 # sess.run(tf.assign(model.lr, self.args.lr * (self.args.decay_rate ** e)))
                 state = model.initial_state_c, model.initial_state_h
                 b = 1
                 while True:
                     try:
-                        train_loss, gd, summary, sigma, mu, rho, binary = sess.run(
-                                [model.cost, model.train_op, merged, model.sigma, model.mu, model.rho, model.binary],
-                                                                     get_feed())
                         print('Training batch : {}'.format(b))
+                        sess.run(model.train_op, feed_dict={ input_data: input_data, mask: mask })
                         b += 1
                     except tf.errors.OutOfRangeError:
                         break
@@ -155,12 +148,12 @@ class Train(object):
                 # end-of-epoch processing
                 # LOG LIKELIHOOD EVERY m EPOCHS
                 if e % args.monitor_every == 0:
-                    sess.run(self.validation_init_op)
+                    sess.run(validation_init_op)
                     ll = 0
                     b = 1
                     while True:
                         try:
-                            ll += sess.run(model.likelihood_op, get_feed())
+                            ll += sess.run(model.likelihood_op, feed_dict={ input_data: input_data, mask: mask })
                             print('Validation batch : {}'.format(b))
                             b += 1
                         except tf.errors.OutOfRangeError:
