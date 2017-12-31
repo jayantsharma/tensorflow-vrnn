@@ -117,7 +117,7 @@ def train(args):
 
         # Loss = KL divergence + BiGaussian negative log-likelihood
         loss = vrnn.loss(distribution_params, input_data, mask, args.x_dim)
-        train_op = vrnn.train(loss, args.lr)
+        training_op = vrnn.train(loss, args.lr)
 
         # ll = -nll
         _, _, dec_mu, dec_sigma, dec_rho, dec_binary, _, _ = distribution_params
@@ -128,6 +128,7 @@ def train(args):
         training_init_op = iterator.make_initializer(training_dataset)
         validation_init_op = iterator.make_initializer(validation_dataset)
 
+        st = time.time()
         tf.global_variables_initializer().run()
         saver = tf.train.Saver(tf.global_variables())
         if ckpt:
@@ -144,7 +145,10 @@ def train(args):
             while True:
                 try:
                     print('Training batch : {}'.format(b))
-                    sess.run(train_op)
+                    sess.run(training_op)
+                    if b % 20 == 0:
+                        print('Time take for last 100 batches: {}'.format(time.time() - st))
+                        st = time.time()
                     b += 1
                 except tf.errors.OutOfRangeError:
                     break
