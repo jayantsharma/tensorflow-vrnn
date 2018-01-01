@@ -149,6 +149,12 @@ def train(FLAGS):
             for _ in range(TRAIN_EXAMPLES // FLAGS.batch_size):
                 sess.run(training_op)
                 if _step % FLAGS.monitor_every == 0:
+                    current_time = time.time()
+                    duration = current_time - _start_time
+                    _start_time = current_time
+                    examples_per_sec = FLAGS.monitor_every * FLAGS.batch_size / duration
+                    sec_per_batch = float(duration / FLAGS.monitor_every)
+
                     print ("Start Monitoring")
                     sess.run(validation_init_op)
                     ll = np.array([])
@@ -158,14 +164,12 @@ def train(FLAGS):
                     ll = np.mean(ll)
 
                     current_time = time.time()
-                    duration = current_time - _start_time
+                    monitor_duration = current_time - _start_time
                     _start_time = current_time
-                    examples_per_sec = FLAGS.monitor_every * FLAGS.batch_size / duration
-                    sec_per_batch = float(duration / FLAGS.monitor_every)
 
-                    format_str = ('%s: Batches %d, likelihood_lower_bound = %.2f (%.1f examples/sec; %.3f sec/batch)')
-                    print (format_str % (datetime.now(), self._step, ll,
-                                       examples_per_sec, sec_per_batch))
+                    format_str = ('%s: Batches %d, likelihood_lower_bound = %.2f (%.1f examples/sec; %.3f sec/batch; %.1f sec/monitoring)')
+                    print (format_str % (datetime.now(), _step, ll,
+                                       examples_per_sec, sec_per_batch, monitor_duration))
                     print ('--'*20 + '\n' + '--'*20)
 
                 _step += 1
