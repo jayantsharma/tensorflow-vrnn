@@ -166,7 +166,7 @@ def likelihood(dec_mu, dec_sigma, dec_rho, dec_binary, y, mask, x_dim):
     mask = tf.reshape(mask, [-1,1])
 
     ll = - nllBiGauss(y, dec_mu, dec_sigma, dec_rho, dec_binary)
-    return tf.reduce_sum(ll * mask, axis=0)
+    return tf.reduce_sum(ll * mask, axis=0)[0]
 
 # TODO: Need to review KL Divergence formula used here
 def klGaussGauss(mu_1, sigma_1, mu_2, sigma_2):
