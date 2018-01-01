@@ -152,8 +152,8 @@ def train(FLAGS):
                     sess.run(validation_init_op)
                     ll = np.array([])
                     for _ in range(VALIDATION_EXAMPLES // FLAGS.batch_size):
-                      _  , likelihood = sess.run([distribution_params, likelihood]) 
-                      ll = np.concatenate([ll, likelihood], axis=0)
+                      _  , _ll = sess.run([distribution_params, likelihood]) 
+                      ll = np.concatenate([ll, _ll], axis=0)
                     ll = np.mean(ll)
 
                     current_time = time.time()
@@ -172,8 +172,8 @@ def train(FLAGS):
         sess.run(validation_init_op)
         ll = np.array([])
         for _ in range(VALIDATION_EXAMPLES // FLAGS.batch_size):
-            _, likelihood = sess.run([distribution_params, likelihood]) 
-            ll = np.concatenate([ll, likelihood], axis=0)
+            _, _ll = sess.run([distribution_params, likelihood]) 
+            ll = np.concatenate([ll, _ll], axis=0)
         ll = np.mean(ll)
         print ('Training finished.')
         format_str = ('likelihood_lower_bound = %.2f')
