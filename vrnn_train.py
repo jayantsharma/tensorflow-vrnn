@@ -149,6 +149,7 @@ def train(FLAGS):
             for _ in range(TRAIN_EXAMPLES // FLAGS.batch_size):
                 sess.run(training_op)
                 if _step % FLAGS.monitor_every == 0:
+                    print ("Start Monitoring")
                     sess.run(validation_init_op)
                     ll = np.array([])
                     for _ in range(VALIDATION_EXAMPLES // FLAGS.batch_size):
