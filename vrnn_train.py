@@ -157,7 +157,8 @@ def train(FLAGS):
                     examples_per_sec = FLAGS.monitor_every * FLAGS.batch_size / duration
                     sec_per_batch = float(duration / FLAGS.monitor_every)
 
-                    print ('Epochs seen: %d,  Batches seen: %d (%.1f examples/sec; %.3f sec/batch)'.format(e, _step, examples_per_sec, sec_per_batch))
+                    format_str = 'Epochs seen: %d,  Batches seen: %d (%.1f examples/sec; %.3f sec/batch)'
+                    print (format_str % (e, _step, examples_per_sec, sec_per_batch))
                     print ("Start Monitoring")
                     ll = np.array([])
                     for _ in range(VALIDATION_EXAMPLES // FLAGS.batch_size):
@@ -170,8 +171,7 @@ def train(FLAGS):
                     monitor_duration = current_time - _start_time
                     _start_time = current_time
 
-                    format_str = ('likelihood_lower_bound = %.2f (%.1f sec/monitoring)')
-                    print (format_str % (ll, monitor_duration))
+                    print ('likelihood_lower_bound = %.2f (%.1f sec/monitoring)' % (ll, monitor_duration))
                     print ('--'*20 + '\n' + '--'*20)
 
         ll = np.array([])
