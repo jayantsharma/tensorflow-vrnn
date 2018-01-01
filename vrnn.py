@@ -34,11 +34,11 @@ class VariationalRNNCell(tf.contrib.rnn.RNNCell):
         # x2s_dim = 250
         # z2s_dim = 150
 
-        self.q_z_dim = 50
-        self.p_z_dim = 50
-        self.p_x_dim = 20
-        self.x2s_dim = 10
-        self.z2s_dim = 50
+        self.q_z_dim = 150
+        self.p_z_dim = 150
+        self.p_x_dim = 250
+        self.x2s_dim = 250
+        self.z2s_dim = 150
 
         self.target_dim = x_dim-1
 
