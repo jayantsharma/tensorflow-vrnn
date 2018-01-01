@@ -24,14 +24,8 @@ from nips2015_vrnn.datasets.iamondb import IAMOnDB
 
 from matplotlib import pyplot as plt
 
-'''
-TODOS:
-    - parameters for depth and width of hidden layers
-    - implement predict function
-    - separate binary and gaussian variables
-    - clean up nomenclature to remove MDCT references
-    - implement separate MDCT training and sampling version
-'''
+TRAIN_EXAMPLES = 10741
+VALIDATION_EXAMPLES = 1438
 
 def load_datasets(FLAGS):
     training_data = IAMOnDB(name='train',
@@ -72,11 +66,11 @@ def load_datasets(FLAGS):
     # Every sequence has shape: length x features
     training_dataset = training_dataset.padded_batch(FLAGS.batch_size, 
             padded_shapes=([FLAGS.max_length, FLAGS.x_dim], [FLAGS.max_length]))
-    validation_dataset = validation_dataset.padded_batch(FLAGS.validation_size, 
+    validation_dataset = validation_dataset.padded_batch(FLAGS.batch_size, 
             padded_shapes=([FLAGS.max_length, FLAGS.x_dim], [FLAGS.max_length]))
 
-    training_dataset = training_dataset.repeat(FLAGS.num_epochs)
-    validation_dataset = validation_dataset.repeat()
+    # training_dataset = training_dataset.repeat(FLAGS.num_epochs)
+    # validation_dataset = validation_dataset.repeat()
 
     return training_dataset, validation_dataset
 
@@ -86,18 +80,21 @@ def process_dataset():
     training_dataset, validation_dataset = load_datasets(FLAGS)
 
     handle = tf.placeholder(tf.string, shape=[])
-    iterator = tf.data.Iterator.from_string_handle(
-            handle, training_dataset.output_types, training_dataset.output_shapes)
+    iterator = tf.data.Iterator.from_structure(training_dataset.output_types,
+                                               training_dataset.output_shapes)
+
+    training_init_op = iterator.make_initializer(training_dataset)
+    validation_init_op = iterator.make_initializer(validation_dataset)
     input, mask = iterator.get_next()
 
-    training_iterator = training_dataset.make_one_shot_iterator()
-    validation_iterator = validation_dataset.make_one_shot_iterator()
+    # training_iterator = training_dataset.make_one_shot_iterator()
+    # validation_iterator = validation_dataset.make_one_shot_iterator()
     # Training input
     # t_input, t_mask = training_iterator.get_next()
     # Validation input
     # v_input, v_mask = validation_iterator.get_next()
 
-    return training_iterator, validation_iterator, input, mask
+    return training_init_op, validation_init_op, input, mask
 
 
 # def get_likelihood(input, mask, FLAGS):
@@ -118,7 +115,7 @@ def train(FLAGS):
     global_step = tf.train.get_or_create_global_step()
 
     # Get training and validation inputs
-    training_iterator, validation_iterator, input, mask = process_dataset()
+    training_init_op, validation_init_op, input, mask = process_dataset()
 
     distribution_params = vrnn.inference(input, mask, FLAGS.x_dim, FLAGS.rnn_dim, FLAGS.z_dim)
 
@@ -130,64 +127,53 @@ def train(FLAGS):
     _, _, dec_mu, dec_sigma, dec_rho, dec_binary, _, _ = distribution_params
     likelihood = vrnn.likelihood(dec_mu, dec_sigma, dec_rho, dec_binary, input, mask, FLAGS.x_dim)
 
-    # training_init_op = iterator.make_initializer(training_dataset)
-    # validation_init_op = iterator.make_initializer(validation_dataset)
-
-    class _LoggerHook(tf.train.SessionRunHook):
-      """Logs loss and runtime."""
-
-      def begin(self):
-        self._step = -1
-        self._start_time = time.time()
-
-      def before_run(self, run_context):
-        self._step += 1
-        if self._step % FLAGS.monitor_every == 0:
-            return tf.train.SessionRunArgs([distribution_params, likelihood], 
-                                            feed_dict={handle: validation_handle})
-
-      def after_run(self, run_context, run_values):
-        if self._step % FLAGS.monitor_every == 0:
-          current_time = time.time()
-          duration = current_time - self._start_time
-          self._start_time = current_time
-
-          _, likelihood_value = run_values.results
-          examples_per_sec = FLAGS.monitor_every * FLAGS.batch_size / duration
-          sec_per_batch = float(duration / FLAGS.monitor_every)
-
-          format_str = ('%s: Batches %d, likelihood_lower_bound = %.2f (%.1f examples/sec; %.3f sec/batch)')
-          print (format_str % (datetime.now(), self._step, likelihood_value,
-                               examples_per_sec, sec_per_batch))
-          print ('--'*20 + '\n' + '--'*20)
-
-
     ckpt = tf.train.get_checkpoint_state(dirname)
-    with tf.train.MonitoredTrainingSession(
-        checkpoint_dir=dirname,
-        hooks=[_LoggerHook()]) as mon_sess:
-
-        # Debugger Needs
-        # with tf_debug.LocalCLIDebugWrapperSession(mon_sess) as sess:
-
-        training_handle = mon_sess.run(training_iterator.string_handle())
-        validation_handle = mon_sess.run(validation_iterator.string_handle())
-
-        while not mon_sess.should_stop():
-          mon_sess.run(training_op, feed_dict={handle: training_handle})
-        _, likelihood = mon_sess.run([distribution_params, likelihood], feed_dict={handle: validation_handle})
-    print ('Training finished.')
-    format_str = ('likelihood_lower_bound = %.2f')
-    print (format_str % (likelihood))
-        # summary_writer = tf.summary.FileWriter('logs/' + datetime.now().isoformat().replace(':', '-'), sess.graph)
+    with tf.Session() as sess:
+        summary_writer = tf.summary.FileWriter('logs/' + datetime.now().isoformat().replace(':', '-'), sess.graph)
         # check = tf.add_check_numerics_ops()
-        # merged = tf.summary.merge_all()
+        merged = tf.summary.merge_all()
 
-        # tf.global_variables_initializer().run()
-        # saver = tf.train.Saver(tf.global_variables())
-        # if ckpt:
-            # saver.restore(sess, ckpt.model_checkpoint_path)
-            # print("Loaded model")
+        tf.global_variables_initializer().run()
+        saver = tf.train.Saver(tf.global_variables())
+        if ckpt:
+            saver.restore(sess, ckpt.model_checkpoint_path)
+            print("Loaded model")
+
+        # training_handle = mon_sess.run(training_iterator.string_handle())
+        # validation_handle = mon_sess.run(validation_iterator.string_handle())
+
+        _step = 0
+        _start_time = time.time()
+        for _ in range(FLAGS.num_epochs):
+            sess.run(training_init_op)
+            for _ in range(TRAIN_EXAMPLES // FLAGS.batch_size):
+                sess.run(training_op)
+                if _step % FLAGS.monitor_every == 0:
+                    sess.run(validation_init_op)
+                    for _ in range(VALIDATION_EXAMPLES // FLAGS.batch_size):
+                      _  , likelihood = sess.run([distribution_params, likelihood]) 
+                      ll += likelihood
+
+                    current_time = time.time()
+                    duration = current_time - _start_time
+                    _start_time = current_time
+                    examples_per_sec = FLAGS.monitor_every * FLAGS.batch_size / duration
+                    sec_per_batch = float(duration / FLAGS.monitor_every)
+
+                    format_str = ('%s: Batches %d, likelihood_lower_bound = %.2f (%.1f examples/sec; %.3f sec/batch)')
+                    print (format_str % (datetime.now(), self._step, ll,
+                                       examples_per_sec, sec_per_batch))
+                    print ('--'*20 + '\n' + '--'*20)
+
+                _step += 1
+
+        sess.run(validation_init_op)
+        for _ in range(VALIDATION_EXAMPLES // FLAGS.batch_size):
+            _, likelihood = sess.run([distribution_params, likelihood]) 
+            ll += likelihood
+        print ('Training finished.')
+        format_str = ('likelihood_lower_bound = %.2f')
+        print (format_str % (ll))
 
         # for e in range(1, FLAGS.num_epochs+1):
             # print('Processing epoch: {}'.format(e))
