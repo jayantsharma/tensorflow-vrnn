@@ -144,45 +144,49 @@ def train(FLAGS):
 
         _step = 0
         _start_time = time.time()
-        for e in range(FLAGS.num_epochs):
-            for _ in range(TRAIN_EXAMPLES // FLAGS.batch_size):
-                sess.run(training_op, 
-                        feed_dict={handle: training_handle})
-                _step += 1
 
-                if _step % FLAGS.monitor_every == 0:
-                    current_time = time.time()
-                    duration = current_time - _start_time
-                    _start_time = current_time
-                    examples_per_sec = FLAGS.monitor_every * FLAGS.batch_size / duration
-                    sec_per_batch = float(duration / FLAGS.monitor_every)
+        try:
+            for e in range(FLAGS.num_epochs):
+                for _ in range(TRAIN_EXAMPLES // FLAGS.batch_size):
+                    sess.run(training_op, 
+                            feed_dict={handle: training_handle})
+                    _step += 1
 
-                    format_str = 'Epochs seen: %d,  Batches seen: %d (%.1f examples/sec; %.3f sec/batch)'
-                    print (format_str % (e, _step, examples_per_sec, sec_per_batch))
-                    print ("Start Monitoring")
-                    ll = np.array([])
-                    for _ in range(VALIDATION_EXAMPLES // FLAGS.batch_size):
-                      _  , _ll = sess.run([distribution_params, likelihood],
-                                          feed_dict={handle: validation_handle}) 
-                    ll = np.concatenate([ll, _ll], axis=0)
-                    ll = np.mean(ll)
+                    if _step % FLAGS.monitor_every == 0:
+                        current_time = time.time()
+                        duration = current_time - _start_time
+                        _start_time = current_time
+                        examples_per_sec = FLAGS.monitor_every * FLAGS.batch_size / duration
+                        sec_per_batch = float(duration / FLAGS.monitor_every)
 
-                    current_time = time.time()
-                    monitor_duration = current_time - _start_time
-                    _start_time = current_time
+                        format_str = 'Epochs seen: %d,  Batches seen: %d (%.1f examples/sec; %.3f sec/batch)'
+                        print (format_str % (e, _step, examples_per_sec, sec_per_batch))
+                        print ("Start Monitoring")
+                        ll = np.array([])
+                        for _ in range(VALIDATION_EXAMPLES // FLAGS.batch_size):
+                          _  , _ll = sess.run([distribution_params, likelihood],
+                                              feed_dict={handle: validation_handle}) 
+                        ll = np.concatenate([ll, _ll], axis=0)
+                        ll = np.mean(ll)
 
-                    print ('likelihood_lower_bound = %.2f (%.1f sec/monitoring)' % (ll, monitor_duration))
-                    print ('--'*20 + '\n' + '--'*20)
+                        current_time = time.time()
+                        monitor_duration = current_time - _start_time
+                        _start_time = current_time
 
-        ll = np.array([])
-        for _ in range(VALIDATION_EXAMPLES // FLAGS.batch_size):
-            _, _ll = sess.run([distribution_params, likelihood], 
-                              feed_dict={handle: validation_handle}) 
-            ll = np.concatenate([ll, _ll], axis=0)
-        ll = np.mean(ll)
-        print ('Training finished.')
-        format_str = ('likelihood_lower_bound = %.2f')
-        print (format_str % (ll))
+                        print ('likelihood_lower_bound = %.2f (%.1f sec/monitoring)' % (ll, monitor_duration))
+                        print ('--'*20 + '\n' + '--'*20)
+
+            ll = np.array([])
+            for _ in range(VALIDATION_EXAMPLES // FLAGS.batch_size):
+                _, _ll = sess.run([distribution_params, likelihood], 
+                                  feed_dict={handle: validation_handle}) 
+                ll = np.concatenate([ll, _ll], axis=0)
+            ll = np.mean(ll)
+            print ('Training finished.')
+            format_str = ('likelihood_lower_bound = %.2f')
+            print (format_str % (ll))
+        except:
+            import ipdb; ipdb.set_trace()
 
         # for e in range(1, FLAGS.num_epochs+1):
             # print('Processing epoch: {}'.format(e))
