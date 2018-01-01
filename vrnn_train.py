@@ -69,8 +69,8 @@ def load_datasets(FLAGS):
     validation_dataset = validation_dataset.padded_batch(FLAGS.batch_size, 
             padded_shapes=([FLAGS.max_length, FLAGS.x_dim], [FLAGS.max_length]))
 
-    # training_dataset = training_dataset.repeat(FLAGS.num_epochs)
-    # validation_dataset = validation_dataset.repeat()
+    training_dataset = training_dataset.repeat(FLAGS.num_epochs)
+    validation_dataset = validation_dataset.repeat()
 
     return training_dataset, validation_dataset
 
@@ -80,21 +80,21 @@ def process_dataset():
     training_dataset, validation_dataset = load_datasets(FLAGS)
 
     handle = tf.placeholder(tf.string, shape=[])
-    iterator = tf.data.Iterator.from_structure(training_dataset.output_types,
-                                               training_dataset.output_shapes)
+    iterator = tf.data.Iterator.from_string_handle(
+                handle, training_dataset.output_types, training_dataset.output_shapes)
 
-    training_init_op = iterator.make_initializer(training_dataset)
-    validation_init_op = iterator.make_initializer(validation_dataset)
+    # training_init_op = iterator.make_initializer(training_dataset)
+    # validation_init_op = iterator.make_initializer(validation_dataset)
     input, mask = iterator.get_next()
 
-    # training_iterator = training_dataset.make_one_shot_iterator()
-    # validation_iterator = validation_dataset.make_one_shot_iterator()
+    training_iterator = training_dataset.make_one_shot_iterator()
+    validation_iterator = validation_dataset.make_one_shot_iterator()
     # Training input
     # t_input, t_mask = training_iterator.get_next()
     # Validation input
     # v_input, v_mask = validation_iterator.get_next()
 
-    return training_init_op, validation_init_op, input, mask
+    return training_iterator, validation_iterator, input, mask
 
 
 # def get_likelihood(input, mask, FLAGS):
@@ -115,7 +115,7 @@ def train(FLAGS):
     global_step = tf.train.get_or_create_global_step()
 
     # Get training and validation inputs
-    training_init_op, validation_init_op, input, mask = process_dataset()
+    training_iterator, validation_iterator, input, mask = process_dataset()
 
     distribution_params = vrnn.inference(input, mask, FLAGS.x_dim, FLAGS.rnn_dim, FLAGS.z_dim)
 
@@ -139,15 +139,17 @@ def train(FLAGS):
             saver.restore(sess, ckpt.model_checkpoint_path)
             print("Loaded model")
 
-        # training_handle = mon_sess.run(training_iterator.string_handle())
-        # validation_handle = mon_sess.run(validation_iterator.string_handle())
+        training_handle = sess.run(training_iterator.string_handle())
+        validation_handle = sess.run(validation_iterator.string_handle())
 
         _step = 0
         _start_time = time.time()
-        for _ in range(FLAGS.num_epochs):
-            sess.run(training_init_op)
+        for e in range(FLAGS.num_epochs):
             for _ in range(TRAIN_EXAMPLES // FLAGS.batch_size):
-                sess.run(training_op)
+                sess.run(training_op, 
+                        feed_dict={handle: training_handle})
+                _step += 1
+
                 if _step % FLAGS.monitor_every == 0:
                     current_time = time.time()
                     duration = current_time - _start_time
@@ -155,29 +157,27 @@ def train(FLAGS):
                     examples_per_sec = FLAGS.monitor_every * FLAGS.batch_size / duration
                     sec_per_batch = float(duration / FLAGS.monitor_every)
 
+                    print ('Epochs seen: %d,  Batches seen: %d (%.1f examples/sec; %.3f sec/batch)'.format(e, _step, examples_per_sec, sec_per_batch))
                     print ("Start Monitoring")
-                    sess.run(validation_init_op)
                     ll = np.array([])
                     for _ in range(VALIDATION_EXAMPLES // FLAGS.batch_size):
-                      _  , _ll = sess.run([distribution_params, likelihood]) 
-                      ll = np.concatenate([ll, _ll], axis=0)
+                      _  , _ll = sess.run([distribution_params, likelihood],
+                                          feed_dict={handle: validation_handle}) 
+                    ll = np.concatenate([ll, _ll], axis=0)
                     ll = np.mean(ll)
 
                     current_time = time.time()
                     monitor_duration = current_time - _start_time
                     _start_time = current_time
 
-                    format_str = ('%s: Batches %d, likelihood_lower_bound = %.2f (%.1f examples/sec; %.3f sec/batch; %.1f sec/monitoring)')
-                    print (format_str % (datetime.now(), _step, ll,
-                                       examples_per_sec, sec_per_batch, monitor_duration))
+                    format_str = ('likelihood_lower_bound = %.2f (%.1f sec/monitoring)')
+                    print (format_str % (ll, monitor_duration))
                     print ('--'*20 + '\n' + '--'*20)
 
-                _step += 1
-
-        sess.run(validation_init_op)
         ll = np.array([])
         for _ in range(VALIDATION_EXAMPLES // FLAGS.batch_size):
-            _, _ll = sess.run([distribution_params, likelihood]) 
+            _, _ll = sess.run([distribution_params, likelihood], 
+                              feed_dict={handle: validation_handle}) 
             ll = np.concatenate([ll, _ll], axis=0)
         ll = np.mean(ll)
         print ('Training finished.')
