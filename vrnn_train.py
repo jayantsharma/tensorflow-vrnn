@@ -153,7 +153,7 @@ def train(FLAGS):
                     ll = 0
                     for _ in range(VALIDATION_EXAMPLES // FLAGS.batch_size):
                       _  , likelihood = sess.run([distribution_params, likelihood]) 
-                      ll += likelihood
+                      ll += likelihood[0]
 
                     current_time = time.time()
                     duration = current_time - _start_time
@@ -172,7 +172,7 @@ def train(FLAGS):
         ll = 0
         for _ in range(VALIDATION_EXAMPLES // FLAGS.batch_size):
             _, likelihood = sess.run([distribution_params, likelihood]) 
-            ll += likelihood
+            ll += likelihood[0]
         print ('Training finished.')
         format_str = ('likelihood_lower_bound = %.2f')
         print (format_str % (ll))
