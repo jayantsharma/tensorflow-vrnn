@@ -150,7 +150,7 @@ def train(FLAGS):
                 sess.run(training_op)
                 if _step % FLAGS.monitor_every == 0:
                     sess.run(validation_init_op)
-                    ll = np.array()
+                    ll = np.array([])
                     for _ in range(VALIDATION_EXAMPLES // FLAGS.batch_size):
                       _  , likelihood = sess.run([distribution_params, likelihood]) 
                       ll = np.concatenate([ll, likelihood], axis=0)
@@ -170,7 +170,7 @@ def train(FLAGS):
                 _step += 1
 
         sess.run(validation_init_op)
-        ll = np.array()
+        ll = np.array([])
         for _ in range(VALIDATION_EXAMPLES // FLAGS.batch_size):
             _, likelihood = sess.run([distribution_params, likelihood]) 
             ll = np.concatenate([ll, likelihood], axis=0)
