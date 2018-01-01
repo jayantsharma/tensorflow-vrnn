@@ -94,6 +94,13 @@ def inputs():
     return t_input, t_mask, v_input, v_mask
 
 
+def get_likelihood(input, mask, FLAGS):
+    _, _, dec_mu, dec_sigma, dec_rho, dec_binary, _, _ = vrnn.inference(input, mask, FLAGS.x_dim, 
+                                                                        FLAGS.rnn_dim, FLAGS.z_dim)
+    likelihood = vrnn.likelihood(dec_mu, dec_sigma, dec_rho, dec_binary, input, mask, FLAGS.x_dim)
+    return likelihood
+
+
 def train(FLAGS):
     dirname = 'save-vrnn'
     if not os.path.exists(dirname):
@@ -114,8 +121,7 @@ def train(FLAGS):
     training_op = vrnn.train(loss, FLAGS.lr, global_step)
 
     # ll = -nll
-    _, _, dec_mu, dec_sigma, dec_rho, dec_binary, _, _ = distribution_params
-    likelihood = vrnn.likelihood(dec_mu, dec_sigma, dec_rho, dec_binary, v_input, v_mask, FLAGS.x_dim)
+    likelihood = get_likelihood(v_input, v_mask, FLAGS)
 
     # training_init_op = iterator.make_initializer(training_dataset)
     # validation_init_op = iterator.make_initializer(validation_dataset)
