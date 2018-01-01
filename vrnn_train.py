@@ -81,24 +81,30 @@ def load_datasets(FLAGS):
     return training_dataset, validation_dataset
 
 
-def inputs():
+def process_dataset():
     # Set up data pipeline
     training_dataset, validation_dataset = load_datasets(FLAGS)
 
-    training_iterator, validation_iterator = training_dataset.make_one_shot_iterator(), validation_dataset.make_one_shot_iterator()
+    handle = tf.placeholder(tf.string, shape=[])
+    iterator = tf.data.Iterator.from_string_handle(
+            handle, training_dataset.output_types, training_dataset.output_shapes)
+    input, mask = iterator.get_next()
+
+    training_iterator = training_dataset.make_one_shot_iterator()
+    validation_iterator = validation_dataset.make_one_shot_iterator()
     # Training input
-    t_input, t_mask = training_iterator.get_next()
+    # t_input, t_mask = training_iterator.get_next()
     # Validation input
-    v_input, v_mask = validation_iterator.get_next()
+    # v_input, v_mask = validation_iterator.get_next()
 
-    return t_input, t_mask, v_input, v_mask
+    return training_iterator, validation_iterator, input, mask
 
 
-def get_likelihood(input, mask, FLAGS):
-    _, _, dec_mu, dec_sigma, dec_rho, dec_binary, _, _ = vrnn.inference(input, mask, FLAGS.x_dim, 
-                                                                        FLAGS.rnn_dim, FLAGS.z_dim)
-    likelihood = vrnn.likelihood(dec_mu, dec_sigma, dec_rho, dec_binary, input, mask, FLAGS.x_dim)
-    return likelihood
+# def get_likelihood(input, mask, FLAGS):
+#     _, _, dec_mu, dec_sigma, dec_rho, dec_binary, _, _ = vrnn.inference(input, mask, FLAGS.x_dim, 
+#                                                                         FLAGS.rnn_dim, FLAGS.z_dim)
+#     likelihood = vrnn.likelihood(dec_mu, dec_sigma, dec_rho, dec_binary, input, mask, FLAGS.x_dim)
+#     return likelihood
 
 
 def train(FLAGS):
@@ -112,16 +118,17 @@ def train(FLAGS):
     global_step = tf.train.get_or_create_global_step()
 
     # Get training and validation inputs
-    t_input, t_mask, v_input, v_mask = inputs()
+    training_iterator, validation_iterator, input, mask = process_dataset()
 
-    distribution_params = vrnn.inference(t_input, t_mask, FLAGS.x_dim, FLAGS.rnn_dim, FLAGS.z_dim)
+    distribution_params = vrnn.inference(input, mask, FLAGS.x_dim, FLAGS.rnn_dim, FLAGS.z_dim)
 
     # Loss = KL divergence + BiGaussian negative log-likelihood
     loss = vrnn.loss(distribution_params, t_input, t_mask, FLAGS.x_dim)
     training_op = vrnn.train(loss, FLAGS.lr, global_step)
 
     # ll = -nll
-    likelihood = get_likelihood(v_input, v_mask, FLAGS)
+    _, _, dec_mu, dec_sigma, dec_rho, dec_binary, _, _ = distribution_params
+    likelihood = vrnn.likelihood(dec_mu, dec_sigma, dec_rho, dec_binary, input, mask, FLAGS.x_dim)
 
     # training_init_op = iterator.make_initializer(training_dataset)
     # validation_init_op = iterator.make_initializer(validation_dataset)
@@ -136,7 +143,8 @@ def train(FLAGS):
       def before_run(self, run_context):
         self._step += 1
         if self._step % FLAGS.monitor_every == 0:
-            return tf.train.SessionRunArgs([loss, likelihood])
+            return tf.train.SessionRunArgs([distribution_params, likelihood], 
+                                            feed_dict={handle: validation_handle})
 
       def after_run(self, run_context, run_values):
         if self._step % FLAGS.monitor_every == 0:
@@ -144,12 +152,12 @@ def train(FLAGS):
           duration = current_time - self._start_time
           self._start_time = current_time
 
-          loss_value, likelihood_value = run_values.results
+          _, likelihood_value = run_values.results
           examples_per_sec = FLAGS.monitor_every * FLAGS.batch_size / duration
           sec_per_batch = float(duration / FLAGS.monitor_every)
 
-          format_str = ('%s: Batches %d, loss_this_batch = %.2f, likelihood_lower_bound = %.2f (%.1f examples/sec; %.3f sec/batch)')
-          print (format_str % (datetime.now(), self._step, loss_value, likelihood,
+          format_str = ('%s: Batches %d, likelihood_lower_bound = %.2f (%.1f examples/sec; %.3f sec/batch)')
+          print (format_str % (datetime.now(), self._step, likelihood_value,
                                examples_per_sec, sec_per_batch))
           print ('--'*20 + '\n' + '--'*20)
 
@@ -158,10 +166,16 @@ def train(FLAGS):
     with tf.train.MonitoredTrainingSession(
         checkpoint_dir=dirname,
         hooks=[_LoggerHook()]) as mon_sess:
-      # with tf_debug.LocalCLIDebugWrapperSession(mon_sess) as sess:
+
+        # Debugger Needs
+        # with tf_debug.LocalCLIDebugWrapperSession(mon_sess) as sess:
+
+        training_handle = sess.run(training_iterator.string_handle())
+        validation_handle = sess.run(validation_iterator.string_handle())
+
         while not mon_sess.should_stop():
-          mon_sess.run(training_op)
-        likelihood = mon_sess.run(likelihood)
+          mon_sess.run(training_op, feed_dict={handle: training_handle})
+        _, likelihood = mon_sess.run([distribution_params, likelihood], feed_dict={handle: validation_handle})
     print ('Training finished.')
     format_str = ('likelihood_lower_bound = %.2f')
     print (format_str % (likelihood))
