@@ -123,7 +123,7 @@ def train(FLAGS):
     distribution_params = vrnn.inference(input, mask, FLAGS.x_dim, FLAGS.rnn_dim, FLAGS.z_dim)
 
     # Loss = KL divergence + BiGaussian negative log-likelihood
-    loss = vrnn.loss(distribution_params, t_input, t_mask, FLAGS.x_dim)
+    loss = vrnn.loss(distribution_params, input, mask, FLAGS.x_dim)
     training_op = vrnn.train(loss, FLAGS.lr, global_step)
 
     # ll = -nll
