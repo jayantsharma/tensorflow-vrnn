@@ -150,10 +150,11 @@ def train(FLAGS):
                 sess.run(training_op)
                 if _step % FLAGS.monitor_every == 0:
                     sess.run(validation_init_op)
-                    ll = 0
+                    ll = np.array()
                     for _ in range(VALIDATION_EXAMPLES // FLAGS.batch_size):
                       _  , likelihood = sess.run([distribution_params, likelihood]) 
-                      ll += likelihood[0]
+                      ll = np.concatenate([ll, likelihood], axis=0)
+                    ll = np.mean(ll)
 
                     current_time = time.time()
                     duration = current_time - _start_time
@@ -169,10 +170,11 @@ def train(FLAGS):
                 _step += 1
 
         sess.run(validation_init_op)
-        ll = 0
+        ll = np.array()
         for _ in range(VALIDATION_EXAMPLES // FLAGS.batch_size):
             _, likelihood = sess.run([distribution_params, likelihood]) 
-            ll += likelihood[0]
+            ll = np.concatenate([ll, likelihood], axis=0)
+        ll = np.mean(ll)
         print ('Training finished.')
         format_str = ('likelihood_lower_bound = %.2f')
         print (format_str % (ll))
