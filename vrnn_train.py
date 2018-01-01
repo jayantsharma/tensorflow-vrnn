@@ -33,32 +33,15 @@ TODOS:
     - implement separate MDCT training and sampling version
 '''
 
-def next_batch(args):
-    t0 = np.random.randn(args.batch_size, 1, (2 * args.chunk_samples))
-    mixed_noise = np.random.randn(
-        args.batch_size, args.seq_length, (2 * args.chunk_samples)) * 0.1
-    #x = t0 + mixed_noise + np.random.randn(
-    #    args.batch_size, args.seq_length, (2 * args.chunk_samples)) * 0.1
-    #y = t0 + mixed_noise + np.random.randn(
-    #    args.batch_size, args.seq_length, (2 * args.chunk_samples)) * 0.1
-    x = np.sin(2 * np.pi * (np.arange(args.seq_length)[np.newaxis, :, np.newaxis] / 10. + t0)) + np.random.randn(
-        args.batch_size, args.seq_length, (2 * args.chunk_samples)) * 0.1 + mixed_noise*0.1
-    y = np.sin(2 * np.pi * (np.arange(1, args.seq_length + 1)[np.newaxis, :, np.newaxis] / 10. + t0)) + np.random.randn(
-        args.batch_size, args.seq_length, (2 * args.chunk_samples)) * 0.1 + mixed_noise*0.1
-
-    y[:, :, args.chunk_samples:] = 0.
-    x[:, :, args.chunk_samples:] = 0.
-    return x, y
-
-def load_datasets(args):
+def load_datasets(FLAGS):
     training_data = IAMOnDB(name='train',
                          prep='normalize',
                          cond=False,
-                         path=args.data_path).data
+                         path=FLAGS.data_path).data
     validation_data = IAMOnDB(name='valid',
                          prep='normalize',
                          cond=False,
-                         path=args.data_path).data
+                         path=FLAGS.data_path).data
 
     """
     Data (training/validation) is a vector of size num_samples, in which each of the samples is sized T x 3.
@@ -87,91 +70,142 @@ def load_datasets(args):
     validation_dataset = validation_dataset.map(lambda x: (x, build_mask(x)))
 
     # Every sequence has shape: length x features
-    training_dataset = training_dataset.padded_batch(args.batch_size, 
-            padded_shapes=([args.max_length, args.x_dim], [args.max_length]))
-    validation_dataset = validation_dataset.padded_batch(args.batch_size, 
-            padded_shapes=([args.max_length, args.x_dim], [args.max_length]))
+    training_dataset = training_dataset.padded_batch(FLAGS.batch_size, 
+            padded_shapes=([FLAGS.max_length, FLAGS.x_dim], [FLAGS.max_length]))
+    validation_dataset = validation_dataset.padded_batch(FLAGS.validation_size, 
+            padded_shapes=([FLAGS.max_length, FLAGS.x_dim], [FLAGS.max_length]))
+
+    training_dataset = training_dataset.repeat(FLAGS.num_epochs)
+    validation_dataset = validation_dataset.repeat()
+
     return training_dataset, validation_dataset
 
-def train(args):
+
+def inputs():
+    # Set up data pipeline
+    training_dataset, validation_dataset = load_datasets(FLAGS)
+
+    training_iterator, validation_iterator = training_dataset.make_one_shot_iterator(), validation_dataset.make_one_shot_iterator()
+    # Training input
+    t_input, t_mask = training_iterator.get_next()
+    # Validation input
+    v_input, v_mask = validation_iterator.get_next()
+
+    return t_input, t_mask, v_input, v_mask
+
+
+def train(FLAGS):
     dirname = 'save-vrnn'
     if not os.path.exists(dirname):
         os.makedirs(dirname)
 
     with open(os.path.join(dirname, 'config.pkl'), 'wb') as f:
-        pickle.dump(args, f)
+        pickle.dump(FLAGS, f)
+
+    global_step = tf.train.get_or_create_global_step()
+
+    # Get training and validation inputs
+    t_input, t_mask, v_input, v_mask = inputs()
+
+    distribution_params = vrnn.inference(t_input, t_mask, FLAGS.x_dim, FLAGS.rnn_dim, FLAGS.z_dim)
+
+    # Loss = KL divergence + BiGaussian negative log-likelihood
+    loss = vrnn.loss(distribution_params, t_input, t_mask, FLAGS.x_dim)
+    training_op = vrnn.train(loss, FLAGS.lr, global_step)
+
+    # ll = -nll
+    _, _, dec_mu, dec_sigma, dec_rho, dec_binary, _, _ = distribution_params
+    likelihood = vrnn.likelihood(dec_mu, dec_sigma, dec_rho, dec_binary, v_input, v_mask, FLAGS.x_dim)
+
+    # training_init_op = iterator.make_initializer(training_dataset)
+    # validation_init_op = iterator.make_initializer(validation_dataset)
+
+    class _LoggerHook(tf.train.SessionRunHook):
+      """Logs loss and runtime."""
+
+      def begin(self):
+        self._step = -1
+        self._start_time = time.time()
+
+      def before_run(self, run_context):
+        self._step += 1
+        if self._step % FLAGS.monitor_every == 0:
+            return tf.train.SessionRunArgs([loss, likelihood])
+
+      def after_run(self, run_context, run_values):
+        if self._step % FLAGS.monitor_every == 0:
+          current_time = time.time()
+          duration = current_time - self._start_time
+          self._start_time = current_time
+
+          loss_value, likelihood_value = run_values.results
+          examples_per_sec = FLAGS.monitor_every * FLAGS.batch_size / duration
+          sec_per_batch = float(duration / FLAGS.monitor_every)
+
+          format_str = ('%s: Batches %d, loss_this_batch = %.2f, likelihood_lower_bound = %.2f (%.1f examples/sec; %.3f sec/batch)')
+          print (format_str % (datetime.now(), self._step, loss_value, likelihood,
+                               examples_per_sec, sec_per_batch))
+          print ('--'*20 + '\n' + '--'*20)
+
 
     ckpt = tf.train.get_checkpoint_state(dirname)
-    with tf.Session() as sess:
-        summary_writer = tf.summary.FileWriter('logs/' + datetime.now().isoformat().replace(':', '-'), sess.graph)
+    with tf.train.MonitoredTrainingSession(
+        checkpoint_dir=dirname,
+        hooks=[_LoggerHook()]) as mon_sess:
+      # with tf_debug.LocalCLIDebugWrapperSession(mon_sess) as sess:
+        while not mon_sess.should_stop():
+          mon_sess.run(training_op)
+        likelihood = mon_sess.run(likelihood)
+    print ('Training finished.')
+    format_str = ('likelihood_lower_bound = %.2f')
+    print (format_str % (likelihood))
+        # summary_writer = tf.summary.FileWriter('logs/' + datetime.now().isoformat().replace(':', '-'), sess.graph)
         # check = tf.add_check_numerics_ops()
         # merged = tf.summary.merge_all()
 
-        # Set up data pipeline
-        training_dataset, validation_dataset = load_datasets(args)
+        # tf.global_variables_initializer().run()
+        # saver = tf.train.Saver(tf.global_variables())
+        # if ckpt:
+            # saver.restore(sess, ckpt.model_checkpoint_path)
+            # print("Loaded model")
 
-        iterator = tf.data.Iterator.from_structure(training_dataset.output_types, training_dataset.output_shapes)
-        input_data, mask = iterator.get_next()
-
-        distribution_params = vrnn.inference(input_data, mask, args.x_dim, args.rnn_dim, args.z_dim)
-
-        # Loss = KL divergence + BiGaussian negative log-likelihood
-        loss = vrnn.loss(distribution_params, input_data, mask, args.x_dim)
-        training_op = vrnn.train(loss, args.lr)
-
-        # ll = -nll
-        _, _, dec_mu, dec_sigma, dec_rho, dec_binary, _, _ = distribution_params
-        likelihood_op = vrnn.likelihood(dec_mu, dec_sigma, dec_rho, dec_binary, input_data, mask, args.x_dim)
-
-        # import ipdb; ipdb.set_trace(context=5);
-
-        training_init_op = iterator.make_initializer(training_dataset)
-        validation_init_op = iterator.make_initializer(validation_dataset)
-
-        st = time.time()
-        tf.global_variables_initializer().run()
-        saver = tf.train.Saver(tf.global_variables())
-        if ckpt:
-            saver.restore(sess, ckpt.model_checkpoint_path)
-            print("Loaded model")
-
-        for e in range(1, args.num_epochs+1):
-            print('Processing epoch: {}'.format(e))
-            sess.run(training_init_op)
-            # sess.run(tf.assign(model.lr, args.lr))
-            # sess.run(tf.assign(model.lr, args.lr * (args.decay_rate ** e)))
+        # for e in range(1, FLAGS.num_epochs+1):
+            # print('Processing epoch: {}'.format(e))
+            # sess.run(training_init_op)
+            # sess.run(tf.assign(model.lr, FLAGS.lr))
+            # sess.run(tf.assign(model.lr, FLAGS.lr * (FLAGS.decay_rate ** e)))
             # state = model.initial_state_c, model.initial_state_h
-            b = 1
-            while True:
-                try:
-                    print('Training batch : {}'.format(b))
-                    sess.run(training_op)
-                    if b % 20 == 0:
-                        print('Time take for last 100 batches: {}'.format(time.time() - st))
-                        st = time.time()
-                    b += 1
-                except tf.errors.OutOfRangeError:
-                    break
+            # b = 1
+            # while True:
+                # try:
+                    # print('Training batch : {}'.format(b))
+                    # sess.run(training_op)
+                    # if b % 20 == 0:
+                        # print('Time take for last 100 batches: {}'.format(time.time() - st))
+                        # st = time.time()
+                    # b += 1
+                # except tf.errors.OutOfRangeError:
+                    # break
 
             # end-of-epoch processing
             # LOG LIKELIHOOD EVERY m EPOCHS
-            if e % args.monitor_every == 0:
-                sess.run(validation_init_op)
-                ll = 0
-                b = 1
-                while True:
-                    try:
-                        print('Validation batch : {}'.format(b))
-                        ll += sess.run(likelihood_op)
-                        b += 1
-                    except tf.errors.OutOfRangeError:
-                        print("{}/{} (epoch {}), log_likelihood = {}".format(e, args.num_epochs, e, ll))
+            # if e % FLAGS.monitor_every == 0:
+                # sess.run(validation_init_op)
+                # ll = 0
+                # b = 1
+                # while True:
+                    # try:
+                        # print('Validation batch : {}'.format(b))
+                        # ll += sess.run(likelihood)
+                        # b += 1
+                    # except tf.errors.OutOfRangeError:
+                        # print("{}/{} (epoch {}), log_likelihood = {}".format(e, FLAGS.num_epochs, e, ll))
                         # summary_writer.add_summary(summary, e)
-                        if e % args.save_every == 0:
-                            checkpoint_path = os.path.join(dirname, 'model.ckpt')
-                            saver.save(sess, checkpoint_path, global_step=e)
-                            print("model saved to {}".format(checkpoint_path))
-                        break
+                        # if e % FLAGS.save_every == 0:
+                            # checkpoint_path = os.path.join(dirname, 'model.ckpt')
+                            # saver.save(sess, checkpoint_path, global_step=e)
+                            # print("model saved to {}".format(checkpoint_path))
+                        # break
 
 if __name__ == '__main__':
     p = configargparse.ArgParser(default_config_files=['tensorflow-vrnn/iamondb.conf'])
@@ -184,6 +218,7 @@ if __name__ == '__main__':
     p.add('--z_dim',      type=int, default=3, help='size of latent space')
     p.add('--num_k',      type=int, default=20, help='number of GMM components')
     p.add('--batch_size', type=int, default=3000, help='minibatch size')
+    p.add('--validation_size', type=int, default=1438, help='validation data size')
     p.add('--num_epochs', type=int, default=100, help='number of epochs')
     p.add('--lr',         type=float, default=0.0005, help='learning rate')
     p.add('--decay_rate', type=float, default=1., help='decay of learning rate')
@@ -193,6 +228,6 @@ if __name__ == '__main__':
     p.add('--debug',      type=int, default=0, help='debug')
     # p.add('-d', '--dbsnp', help='known variants .vcf', env_var='DBSNP_PATH')
 
-    args = p.parse_args()
+    FLAGS = p.parse_args()
 
-    train(args)
+    train(FLAGS)

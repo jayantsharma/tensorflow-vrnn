@@ -166,7 +166,7 @@ def likelihood(dec_mu, dec_sigma, dec_rho, dec_binary, y, mask, x_dim):
     mask = tf.reshape(mask, [-1,1])
 
     ll = - nllBiGauss(y, dec_mu, dec_sigma, dec_rho, dec_binary)
-    return tf.reduce_sum(ll * mask, axis=0)
+    return tf.reduce_mean(ll * mask, axis=0)
 
 # TODO: Need to review KL Divergence formula used here
 def klGaussGauss(mu_1, sigma_1, mu_2, sigma_2):
@@ -253,7 +253,7 @@ def inference(input_data, mask, x_dim, rnn_dim, z_dim):
 
     return outputs_reshape
 
-def train(loss, lr):
+def train(loss, lr, global_step):
     tvars = tf.trainable_variables()
     for t in tvars:
         print(t.name)
@@ -263,7 +263,7 @@ def train(loss, lr):
     #    tf.global_norm(grads) > 1e-20,
     #    lambda: tf.clip_by_global_norm(grads, args.grad_clip)[0],
     #    lambda: grads)
-    train_op = optimizer.apply_gradients(grads)
+    train_op = optimizer.apply_gradients(grads, global_step=global_step)
     return train_op
     #self.saver = tf.train.Saver(tf.all_variables())
 
