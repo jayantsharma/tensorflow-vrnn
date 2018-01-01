@@ -164,9 +164,9 @@ def train(FLAGS):
                         print ("Start Monitoring")
                         ll = np.array([])
                         for _ in range(VALIDATION_EXAMPLES // FLAGS.batch_size):
-                          _  , _ll = sess.run([distribution_params, likelihood],
-                                              feed_dict={handle: validation_handle}) 
-                        ll = np.concatenate([ll, _ll], axis=0)
+                            _  , _ll = sess.run([distribution_params, likelihood],
+                                                  feed_dict={handle: validation_handle}) 
+                            ll = np.concatenate([ll, _ll], axis=0)
                         ll = np.mean(ll)
 
                         current_time = time.time()
