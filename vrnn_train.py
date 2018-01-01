@@ -66,7 +66,7 @@ def load_datasets(FLAGS):
     # Every sequence has shape: length x features
     training_dataset = training_dataset.padded_batch(FLAGS.batch_size, 
             padded_shapes=([FLAGS.max_length, FLAGS.x_dim], [FLAGS.max_length]))
-    validation_dataset = validation_dataset.padded_batch(FLAGS.batch_size, 
+    validation_dataset = validation_dataset.padded_batch(FLAGS.validation_batch_size, 
             padded_shapes=([FLAGS.max_length, FLAGS.x_dim], [FLAGS.max_length]))
 
     training_dataset = training_dataset.repeat(FLAGS.num_epochs)
@@ -148,7 +148,7 @@ def train(FLAGS):
         try:
             for e in range(FLAGS.num_epochs):
                 for _ in range(TRAIN_EXAMPLES // FLAGS.batch_size):
-                    sess.run(training_op, 
+                    sess.run([training_op], 
                             feed_dict={handle: training_handle})
                     _step += 1
 
@@ -163,8 +163,8 @@ def train(FLAGS):
                         print (format_str % (e, _step, examples_per_sec, sec_per_batch))
                         print ("Start Monitoring")
                         ll = np.array([])
-                        for _ in range(VALIDATION_EXAMPLES // FLAGS.batch_size):
-                            _  , _ll = sess.run([distribution_params, likelihood],
+                        for _ in range(VALIDATION_EXAMPLES // FLAGS.validation_batch_size):
+                            _  , _ll = sess.run([likelihood],
                                                   feed_dict={handle: validation_handle}) 
                             ll = np.concatenate([ll, _ll], axis=0)
                         ll = np.mean(ll)
@@ -177,8 +177,8 @@ def train(FLAGS):
                         print ('--'*20 + '\n' + '--'*20)
 
             ll = np.array([])
-            for _ in range(VALIDATION_EXAMPLES // FLAGS.batch_size):
-                _, _ll = sess.run([distribution_params, likelihood], 
+            for _ in range(VALIDATION_EXAMPLES // FLAGS.validation_batch_size):
+                _, _ll = sess.run([likelihood], 
                                   feed_dict={handle: validation_handle}) 
                 ll = np.concatenate([ll, _ll], axis=0)
             ll = np.mean(ll)
@@ -236,8 +236,8 @@ if __name__ == '__main__':
     p.add('--x_dim',      type=int, default=3, help='size of input')
     p.add('--z_dim',      type=int, default=3, help='size of latent space')
     p.add('--num_k',      type=int, default=20, help='number of GMM components')
-    p.add('--batch_size', type=int, default=3000, help='minibatch size')
-    p.add('--validation_size', type=int, default=1438, help='validation data size')
+    p.add('--batch_size', type=int, default=20, help='minibatch size')
+    p.add('--validation_batch_size', type=int, default=50, help='validation batch size')
     p.add('--num_epochs', type=int, default=100, help='number of epochs')
     p.add('--lr',         type=float, default=0.0005, help='learning rate')
     p.add('--decay_rate', type=float, default=1., help='decay of learning rate')
