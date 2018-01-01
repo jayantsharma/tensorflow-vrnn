@@ -94,7 +94,7 @@ def process_dataset():
     # Validation input
     # v_input, v_mask = validation_iterator.get_next()
 
-    return training_iterator, validation_iterator, input, mask
+    return handle, training_iterator, validation_iterator, input, mask
 
 
 # def get_likelihood(input, mask, FLAGS):
@@ -115,7 +115,7 @@ def train(FLAGS):
     global_step = tf.train.get_or_create_global_step()
 
     # Get training and validation inputs
-    training_iterator, validation_iterator, input, mask = process_dataset()
+    handle, training_iterator, validation_iterator, input, mask = process_dataset()
 
     distribution_params = vrnn.inference(input, mask, FLAGS.x_dim, FLAGS.rnn_dim, FLAGS.z_dim)
 
