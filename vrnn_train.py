@@ -170,8 +170,8 @@ def train(FLAGS):
         # Debugger Needs
         # with tf_debug.LocalCLIDebugWrapperSession(mon_sess) as sess:
 
-        training_handle = sess.run(training_iterator.string_handle())
-        validation_handle = sess.run(validation_iterator.string_handle())
+        training_handle = mon_sess.run(training_iterator.string_handle())
+        validation_handle = mon_sess.run(validation_iterator.string_handle())
 
         while not mon_sess.should_stop():
           mon_sess.run(training_op, feed_dict={handle: training_handle})
