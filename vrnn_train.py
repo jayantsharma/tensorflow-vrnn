@@ -120,12 +120,12 @@ def train(FLAGS):
     distribution_params = vrnn.inference(input, mask, FLAGS.x_dim, FLAGS.rnn_dim, FLAGS.z_dim)
 
     # Loss = KL divergence + BiGaussian negative log-likelihood
-    loss = vrnn.loss(distribution_params, input, mask, FLAGS.x_dim)
+    kl_loss, nll_loss, loss = vrnn.loss(distribution_params, input, mask, FLAGS.x_dim)
     training_op = vrnn.train(loss, FLAGS.lr, global_step)
 
     # ll = -nll
-    _, _, dec_mu, dec_sigma, dec_rho, dec_binary, _, _ = distribution_params
-    likelihood = vrnn.likelihood(dec_mu, dec_sigma, dec_rho, dec_binary, input, mask, FLAGS.x_dim)
+    # _, _, dec_mu, dec_sigma, dec_rho, dec_binary, _, _ = distribution_params
+    # likelihood = vrnn.likelihood(dec_mu, dec_sigma, dec_rho, dec_binary, input, mask, FLAGS.x_dim)
 
     ckpt = tf.train.get_checkpoint_state(dirname)
     with tf.Session() as sess:
@@ -145,48 +145,44 @@ def train(FLAGS):
         _step = 0
         _start_time = time.time()
 
-        try:
-            for e in range(FLAGS.num_epochs):
-                for _ in range(TRAIN_EXAMPLES // FLAGS.batch_size):
-                    sess.run([training_op], 
-                            feed_dict={handle: training_handle})
-                    _step += 1
+        for e in range(FLAGS.num_epochs):
+            for _ in range(TRAIN_EXAMPLES // FLAGS.batch_size):
+                sess.run([training_op], 
+                        feed_dict={handle: training_handle})
+                _step += 1
 
-                    if _step % FLAGS.monitor_every == 0:
-                        current_time = time.time()
-                        duration = current_time - _start_time
-                        _start_time = current_time
-                        examples_per_sec = FLAGS.monitor_every * FLAGS.batch_size / duration
-                        sec_per_batch = float(duration / FLAGS.monitor_every)
+                if _step % FLAGS.monitor_every == 0:
+                    current_time = time.time()
+                    duration = current_time - _start_time
+                    _start_time = current_time
+                    examples_per_sec = FLAGS.monitor_every * FLAGS.batch_size / duration
+                    sec_per_batch = float(duration / FLAGS.monitor_every)
 
-                        format_str = 'Epochs seen: %d,  Batches seen: %d (%.1f examples/sec; %.3f sec/batch)'
-                        print (format_str % (e, _step, examples_per_sec, sec_per_batch))
-                        print ("Start Monitoring")
-                        ll = np.array([])
-                        for _ in range(VALIDATION_EXAMPLES // FLAGS.validation_batch_size):
-                            _  , _ll = sess.run([likelihood],
-                                                  feed_dict={handle: validation_handle}) 
-                            ll = np.concatenate([ll, _ll], axis=0)
-                        ll = np.mean(ll)
+                    format_str = 'Epochs seen: %d,  Batches seen: %d (%.1f examples/sec; %.3f sec/batch)'
+                    print (format_str % (e, _step, examples_per_sec, sec_per_batch))
+                    print ("Start Monitoring")
+                    kl, nll, loss = 0, 0, 0
+                    for _ in range(VALIDATION_EXAMPLES // FLAGS.validation_batch_size):
+                        _kl, _nll, _loss = sess.run([kl_loss, nll_loss, loss],
+                                                   feed_dict={handle: validation_handle}) 
+                        kl += _kl; nll += _nll; loss += _loss
 
-                        current_time = time.time()
-                        monitor_duration = current_time - _start_time
-                        _start_time = current_time
+                    current_time = time.time()
+                    monitor_duration = current_time - _start_time
+                    _start_time = current_time
 
-                        print ('likelihood_lower_bound = %.2f (%.1f sec/monitoring)' % (ll, monitor_duration))
-                        print ('--'*20 + '\n' + '--'*20)
+                    format_str = 'kl_term = %.2f, nll_loss = %.2f, variational_lower_bound = %.2f (%.1f sec/monitoring)'
+                    print (format_str % (kl, nll, -loss, monitor_duration))
+                    print ('--'*20 + '\n' + '--'*20)
 
-            ll = np.array([])
-            for _ in range(VALIDATION_EXAMPLES // FLAGS.validation_batch_size):
-                _, _ll = sess.run([likelihood], 
-                                  feed_dict={handle: validation_handle}) 
-                ll = np.concatenate([ll, _ll], axis=0)
-            ll = np.mean(ll)
-            print ('Training finished.')
-            format_str = ('likelihood_lower_bound = %.2f')
-            print (format_str % (ll))
-        except:
-            import ipdb; ipdb.set_trace()
+        kl, nll, loss = 0, 0, 0
+        for _ in range(VALIDATION_EXAMPLES // FLAGS.validation_batch_size):
+            _kl, _nll, _loss = sess.run([kl_loss, nll_loss, loss],
+                                       feed_dict={handle: validation_handle}) 
+            kl += _kl; nll += _nll; loss += _loss
+        print ('Training finished.')
+        format_str = 'kl_term = %.2f, nll_loss = %.2f, variational_lower_bound = %.2f (%.1f sec/monitoring)'
+        print (format_str % (kl, nll, -loss, monitor_duration))
 
         # for e in range(1, FLAGS.num_epochs+1):
             # print('Processing epoch: {}'.format(e))

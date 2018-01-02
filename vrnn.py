@@ -162,8 +162,10 @@ def nllBiGauss(y, mu, sig, corr, binary):
 
 def likelihood(dec_mu, dec_sigma, dec_rho, dec_binary, y, mask, x_dim):
     # Nt x D
+    y_shape = y.shape
     y = tf.reshape(y, [-1, x_dim])
-    mask = tf.reshape(mask, [-1,1])
+
+    # mask = tf.reshape(mask, [-1,1])
 
     ll = - nllBiGauss(y, dec_mu, dec_sigma, dec_rho, dec_binary)
     return tf.reshape(ll * mask, [-1])  # vector
@@ -186,19 +188,28 @@ def klGaussGauss(mu_1, sigma_1, mu_2, sigma_2):
 
 def loss(distribution_params, y, mask, x_dim):
     enc_mu, enc_sigma, dec_mu, dec_sigma, dec_rho, dec_binary, prior_mu, prior_sigma = distribution_params
-    # Nt x D
-    y = tf.reshape(y, [-1, x_dim])
-    mask = tf.reshape(mask, [-1,1])
+
+    y_shape = y.shape                  # [N,t,D]
+    y = tf.reshape(y, [-1, x_dim])     # Nt x D
+
+    # mask = tf.reshape(mask, [-1,1])
 
     kl_loss = klGaussGauss(enc_mu, enc_sigma, prior_mu, prior_sigma)
+    kl_loss = tf.reshape(kl_loss, (y_shape[0], y_shape[1]))             # Nt x 1 -> N x t
+    kl_loss = kl_loss * mask
+
     nll_loss = nllBiGauss(y, dec_mu, dec_sigma, dec_rho, dec_binary)
+    nll_loss = tf.reshape(nll_loss, (y_shape[0], y_shape[1]))           # Nt x 1 -> N x t
+    nll_loss = nll_loss * mask
 
     loss = kl_loss + nll_loss
+    loss = tf.reduce_mean(tf.reduce_sum(loss, axis=0))
+
     # import pdb; pdb.set_trace();
-    loss = loss * mask
-    loss = tf.reshape(loss, [-1])
-    return tf.reduce_mean(loss, axis=0)
-    #return tf.reduce_mean(likelihood_loss)
+    # loss = loss * mask
+    # loss = tf.reshape(loss, [-1])
+
+    return [kl_loss, nll_loss, loss]
 
 def inference(input_data, mask, x_dim, rnn_dim, z_dim):
     cell = VariationalRNNCell(x_dim, rnn_dim, z_dim)
