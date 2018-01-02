@@ -172,8 +172,8 @@ def train(FLAGS):
                     examples_per_sec = FLAGS.monitor_every * FLAGS.batch_size / duration
                     sec_per_batch = float(duration / FLAGS.monitor_every)
 
-                    format_str = 'Epochs seen: %d,  Batches seen: %d (%.1f examples/sec; %.3f sec/batch)'
-                    print (format_str % (e, _step, examples_per_sec, sec_per_batch))
+                    format_str = 'Epochs seen: %d,  Batches seen: %d; Time taken: %.1f (%.1f examples/sec; %.1f sec/batch;)'
+                    print (format_str % (e, _step, duration, examples_per_sec, sec_per_batch))
                     print ("Start monitoring")
                     monitor()
 
