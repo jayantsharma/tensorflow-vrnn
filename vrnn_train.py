@@ -161,28 +161,28 @@ def train(FLAGS):
                     format_str = 'Epochs seen: %d,  Batches seen: %d (%.1f examples/sec; %.3f sec/batch)'
                     print (format_str % (e, _step, examples_per_sec, sec_per_batch))
                     print ("Start Monitoring")
-                    kl, nll, loss = 0., 0., 0.
+                    kl, nll, nvlb = 0., 0., 0.
                     for _ in range(VALIDATION_EXAMPLES // FLAGS.validation_batch_size):
-                        _kl, _nll, _loss = sess.run([kl_loss, nll_loss, loss],
+                        _kl, _nll, _nvlb = sess.run([kl_loss, nll_loss, loss],
                                                    feed_dict={handle: validation_handle}) 
-                        kl += _kl[0]; nll += _nll[0]; loss += _loss[0]
+                        kl += _kl; nll += _nll; nvlb += _nvlb
 
                     current_time = time.time()
                     monitor_duration = current_time - _start_time
                     _start_time = current_time
 
                     format_str = 'kl_term = %.2f, nll_loss = %.2f, variational_lower_bound = %.2f (%.1f sec/monitoring)'
-                    print (format_str % (kl, nll, -loss, monitor_duration))
+                    print (format_str % (kl, nll, -nvlb, monitor_duration))
                     print ('--'*20 + '\n' + '--'*20)
 
-        kl, nll, loss = 0., 0., 0.
+        kl, nll, nvlb = 0., 0., 0.
         for _ in range(VALIDATION_EXAMPLES // FLAGS.validation_batch_size):
-            _kl, _nll, _loss = sess.run([kl_loss, nll_loss, loss],
+            _kl, _nll, _nvlb = sess.run([kl_loss, nll_loss, loss],
                                        feed_dict={handle: validation_handle}) 
-            kl += _kl[0]; nll += _nll[0]; loss += _loss[0]
+            kl += _kl; nll += _nll; nvlb += _nvlb
         print ('Training finished.')
         format_str = 'kl_term = %.2f, nll_loss = %.2f, variational_lower_bound = %.2f (%.1f sec/monitoring)'
-        print (format_str % (kl, nll, -loss, monitor_duration))
+        print (format_str % (kl, nll, -nvlb, monitor_duration))
 
         # for e in range(1, FLAGS.num_epochs+1):
             # print('Processing epoch: {}'.format(e))
