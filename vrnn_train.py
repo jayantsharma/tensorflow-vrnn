@@ -4,6 +4,7 @@ from future import standard_library
 standard_library.install_aliases()
 from builtins import range
 from builtins import object
+
 import numpy as np
 import tensorflow as tf
 
@@ -14,6 +15,7 @@ import time
 from datetime import datetime
 import os
 import pickle
+import logging
 
 import vrnn
 
@@ -26,6 +28,8 @@ from matplotlib import pyplot as plt
 
 TRAIN_EXAMPLES = 10741
 VALIDATION_EXAMPLES = 1438
+
+logging.basicConfig(level=logging.INFO)
 
 def load_datasets(FLAGS):
     training_data = IAMOnDB(name='train',
@@ -155,10 +159,10 @@ def train(FLAGS):
 
             monitor_duration = time.time() - _start_time
             format_str = 'kl_term = %.2f, nll_loss = %.2f, variational_lower_bound = %.2f (%.1f sec/monitoring)'
-            print (format_str % (kl, nll, -nvlb, monitor_duration))
-            print ('--'*20 + '\n' + '--'*20)
+            logging.info(format_str % (kl, nll, -nvlb, monitor_duration))
+            logging.info('--'*20 + '\n' + '--'*20)
 
-        print ('Initial monitoring.')
+        logging.info('Initial monitoring.')
         monitor()
 
         for e in range(FLAGS.num_epochs):
@@ -173,13 +177,13 @@ def train(FLAGS):
                     sec_per_batch = float(duration / FLAGS.monitor_every)
 
                     format_str = 'Epochs seen: %d,  Batches seen: %d; Time taken: %.1f (%.1f examples/sec; %.1f sec/batch;)'
-                    print (format_str % (e, _step, duration, examples_per_sec, sec_per_batch))
-                    print ("Start monitoring")
+                    logging.info(format_str % (e, _step, duration, examples_per_sec, sec_per_batch))
+                    logging.info("Start monitoring")
                     monitor()
 
                     _start_time = time.time()
 
-        print ('Training finished.')
+        logging.info('Training finished.')
         monitor()
 
         # for e in range(1, FLAGS.num_epochs+1):
