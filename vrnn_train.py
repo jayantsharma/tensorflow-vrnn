@@ -161,7 +161,7 @@ def train(FLAGS):
                     format_str = 'Epochs seen: %d,  Batches seen: %d (%.1f examples/sec; %.3f sec/batch)'
                     print (format_str % (e, _step, examples_per_sec, sec_per_batch))
                     print ("Start Monitoring")
-                    kl, nll, loss = 0, 0, 0
+                    kl, nll, loss = 0., 0., 0.
                     for _ in range(VALIDATION_EXAMPLES // FLAGS.validation_batch_size):
                         _kl, _nll, _loss = sess.run([kl_loss, nll_loss, loss],
                                                    feed_dict={handle: validation_handle}) 
@@ -175,7 +175,7 @@ def train(FLAGS):
                     print (format_str % (kl, nll, -loss, monitor_duration))
                     print ('--'*20 + '\n' + '--'*20)
 
-        kl, nll, loss = 0, 0, 0
+        kl, nll, loss = 0., 0., 0.
         for _ in range(VALIDATION_EXAMPLES // FLAGS.validation_batch_size):
             _kl, _nll, _loss = sess.run([kl_loss, nll_loss, loss],
                                        feed_dict={handle: validation_handle}) 
