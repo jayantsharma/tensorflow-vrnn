@@ -165,7 +165,7 @@ def train(FLAGS):
                     for _ in range(VALIDATION_EXAMPLES // FLAGS.validation_batch_size):
                         _kl, _nll, _loss = sess.run([kl_loss, nll_loss, loss],
                                                    feed_dict={handle: validation_handle}) 
-                        kl += _kl; nll += _nll; loss += _loss
+                        kl += _kl[0]; nll += _nll[0]; loss += _loss[0]
 
                     current_time = time.time()
                     monitor_duration = current_time - _start_time
@@ -179,7 +179,7 @@ def train(FLAGS):
         for _ in range(VALIDATION_EXAMPLES // FLAGS.validation_batch_size):
             _kl, _nll, _loss = sess.run([kl_loss, nll_loss, loss],
                                        feed_dict={handle: validation_handle}) 
-            kl += _kl; nll += _nll; loss += _loss
+            kl += _kl[0]; nll += _nll[0]; loss += _loss[0]
         print ('Training finished.')
         format_str = 'kl_term = %.2f, nll_loss = %.2f, variational_lower_bound = %.2f (%.1f sec/monitoring)'
         print (format_str % (kl, nll, -loss, monitor_duration))
