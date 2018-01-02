@@ -197,13 +197,14 @@ def loss(distribution_params, y, mask, x_dim):
     kl_loss = klGaussGauss(enc_mu, enc_sigma, prior_mu, prior_sigma)
     kl_loss = tf.reshape(kl_loss, [-1, y_shape[1]])             # Nt x 1 -> N x t
     kl_loss = kl_loss * mask
+    kl_loss = tf.reduce_mean(tf.reduce_sum(kl_loss, axis=0))
 
     nll_loss = nllBiGauss(y, dec_mu, dec_sigma, dec_rho, dec_binary)
     nll_loss = tf.reshape(nll_loss, [-1, y_shape[1]])           # Nt x 1 -> N x t
     nll_loss = nll_loss * mask
+    nll_loss = tf.reduce_mean(tf.reduce_sum(nll_loss, axis=0))
 
     loss = kl_loss + nll_loss
-    loss = tf.reduce_mean(tf.reduce_sum(loss, axis=0))
 
     # import pdb; pdb.set_trace();
     # loss = loss * mask
