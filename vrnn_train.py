@@ -147,18 +147,16 @@ def train(FLAGS):
 
         def monitor():
             kl, nll, nvlb = 0., 0., 0.
+            _start_time = time.time()
             for _ in range(VALIDATION_EXAMPLES // FLAGS.validation_batch_size):
-                _start_time = time.time()
-
                 _kl, _nll, _nvlb = sess.run([kl_loss, nll_loss, loss],
                                            feed_dict={handle: validation_handle}) 
                 kl += _kl; nll += _nll; nvlb += _nvlb
 
-                monitor_duration = time.time() - _start_time
-
-                format_str = 'kl_term = %.2f, nll_loss = %.2f, variational_lower_bound = %.2f (%.1f sec/monitoring)'
-                print (format_str % (kl, nll, -nvlb, monitor_duration))
-                print ('--'*20 + '\n' + '--'*20)
+            monitor_duration = time.time() - _start_time
+            format_str = 'kl_term = %.2f, nll_loss = %.2f, variational_lower_bound = %.2f (%.1f sec/monitoring)'
+            print (format_str % (kl, nll, -nvlb, monitor_duration))
+            print ('--'*20 + '\n' + '--'*20)
 
         print ('Initial monitoring.')
         monitor()
